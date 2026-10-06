@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: agent-flight-recorder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: PYTHONPATH=backend python -m flightrecorder.server
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # "simulated" needs no secrets. Set to "real" and add the two PayPal
+      # sandbox values below in the Render dashboard to create real sandbox orders.
+      - key: DEMO_PAYPAL
+        value: simulated
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false

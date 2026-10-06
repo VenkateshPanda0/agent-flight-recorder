@@ -24,17 +24,22 @@ Built for the PayPal AI Hackathon. Sandbox only; no real money moves.
 
 | Part | State |
 |---|---|
-| Signed mandates | Done, tested |
+| Signed mandates (Ed25519, canonical JSON) | Done, tested |
 | Guard with reason codes | Done, tested |
-| Tamper-evident log | Done, tested |
-| PayPal client and purchase orchestrator | Done; tested with a fake transport |
-| Real PayPal sandbox order (OAuth + Orders v2 create) | Verified 6 Oct 2026 via `scripts/sandbox_smoke.py` |
-| Webhooks | Not started |
-| Dispute evidence through the Disputes API | Not started |
-| Shopping agent | Not started |
-| Dashboard | Not started |
+| Hash-chained log, derived budget state | Done, tested |
+| PayPal client and purchase orchestrator | Done, tested with a fake transport |
+| Real PayPal sandbox order (OAuth + Orders v2 create) | Verified, including through the dashboard (`scripts/sandbox_smoke.py`) |
+| Evidence bundle + offline verifier | Done, tested with 8 tamper cases |
+| Dispute evidence via Disputes API (multipart) | Written to the documented API; tested against a fake transport only. **Not yet run against a real sandbox dispute** (needs a sandbox buyer action) |
+| Webhooks (signature verified, idempotent) | Done, tested with a fake transport; not yet registered with PayPal |
+| Red-team suite | 27 attack scenarios, 27 blocked (see below) |
+| Dashboard and demo server | Done |
+| Shopping agent | Scripted proposer always; live-model proposer written, needs `ANTHROPIC_API_KEY` |
 
-## Run the tests
+Order capture needs a sandbox buyer to approve the order in a browser, so
+captured orders and live disputes are not exercised automatically.
+
+## Run it
 
 Requires Python 3.10 or newer.
 
@@ -42,8 +47,29 @@ Requires Python 3.10 or newer.
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest
+python -m pytest                       # all tests
+python scripts/redteam_report.py       # red-team block rate
+DEMO_PAYPAL=simulated PYTHONPATH=backend python -m flightrecorder.server   # http://localhost:8000
 ```
+
+On Windows PowerShell use `$env:DEMO_PAYPAL="simulated"; $env:PYTHONPATH="backend"; python -m flightrecorder.server`.
+Without `DEMO_PAYPAL=simulated` and with sandbox credentials in `.env`, the
+demo creates real PayPal **sandbox** orders; the page shows which mode is active.
+
+## Red-team results
+
+`python scripts/redteam_report.py` runs adversarial scenarios through the real
+orchestrator and counts a scenario as blocked only if no PayPal order call was
+made beyond a single legitimate one. Current result: **27 of 27 attack
+scenarios blocked** (prompt-injected rationale, inflated or under-reported
+totals, negative and float prices, lookalike and homoglyph merchants, currency
+swap, replay, expiry, revocation, order splitting, forged mandate). Two
+scenarios inside the mandate's scope are **not** blocked, on purpose: an
+overpriced but permitted item at an allowed merchant, and injected text in an
+item name on an otherwise valid order. The mandate allowed those purchases.
+
+Caveat: the scenarios were written by the same author as the guard, so this
+is a regression suite, not independent testing.
 
 ## Configuration
 
@@ -66,8 +92,9 @@ and secret from the PayPal developer dashboard. `.env` is ignored by git.
 
 ## Tools used
 
-Built with AI assistance (Claude). Python, `cryptography` (Ed25519), SQLite,
-pytest.
+Built with AI assistance (Claude Code). Python standard library, `cryptography`
+(Ed25519), SQLite, pytest; PayPal Orders v2, OAuth, Customer Disputes and
+Webhooks (sandbox); optional Anthropic Messages API for the demo agent.
 
 ## Licence
 

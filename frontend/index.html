@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Flight Recorder</title>
+<style>
+:root {
+  --bg:#f6f7f9; --card:#fff; --ink:#14181f; --muted:#5b6472; --line:#e3e6eb;
+  --accent:#0b5fff; --ok:#0a7a3f; --okbg:#e3f5eb; --warn:#8a5a00; --warnbg:#fff1d6;
+  --bad:#b3261e; --badbg:#fde7e5; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0e1116; --card:#171b22; --ink:#e8ebf0; --muted:#9aa4b2; --line:#2a303a;
+    --accent:#6ea1ff; --ok:#5fd18f; --okbg:#12301f; --warn:#f0b650; --warnbg:#3a2c10;
+    --bad:#ff8b84; --badbg:#3d1714;
+  }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+header { padding:20px 16px 8px; max-width:1180px; margin:0 auto; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
+header p { margin:0; color:var(--muted); flex:1 1 300px; }
+.badge { font:600 12px var(--mono); padding:3px 8px; border-radius:99px; border:1px solid var(--line); background:var(--card); }
+.badge.sandbox { color:var(--ok); border-color:var(--ok); } .badge.simulated { color:var(--warn); border-color:var(--warn); }
+main { max-width:1180px; margin:0 auto; padding:8px 16px 48px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0; }
+.card.wide { grid-column: 1 / -1; }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
+dl { display:grid; grid-template-columns: max-content 1fr; gap:4px 14px; margin:0; }
+dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+.mono { font-family:var(--mono); font-size:12.5px; }
+.meter { height:10px; background:var(--line); border-radius:99px; overflow:hidden; margin:6px 0 2px; }
+.meter > div { height:100%; background:var(--accent); width:0; transition:width .3s; }
+.row { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+button { font:inherit; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+button:hover { border-color:var(--accent); } button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.danger { color:var(--bad); } button:disabled { opacity:.5; cursor:default; }
+.verdict { display:inline-block; font:700 13px var(--mono); padding:3px 9px; border-radius:6px; }
+.ALLOW,.ORDER_CREATED { background:var(--okbg); color:var(--ok); }
+.NEEDS_APPROVAL,.PENDING_APPROVAL { background:var(--warnbg); color:var(--warn); }
+.DENY,.DENIED,.ORDER_FAILED { background:var(--badbg); color:var(--bad); }
+.codes { margin:8px 0 0; padding:0; list-style:none; display:grid; gap:4px; }
+.codes li { font-size:13.5px; } .codes b { font-family:var(--mono); font-size:12.5px; }
+.note { color:var(--muted); font-size:13.5px; margin:8px 0 0; }
+.tablewrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th,td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+th { color:var(--muted); font-weight:600; } tr.bad td { background:var(--badbg); color:var(--bad); }
+.status { padding:10px 12px; border-radius:8px; margin-top:8px; font-weight:600; }
+.status.ok { background:var(--okbg); color:var(--ok); } .status.bad { background:var(--badbg); color:var(--bad); }
+textarea, input[type=text] { width:100%; font:12.5px var(--mono); padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+textarea { min-height:90px; }
+ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
+.err { color:var(--bad); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Flight Recorder</h1>
+  <p>When an AI agent buys something and it is disputed, this is the record of what it was allowed to do and what it did.</p>
+  <span id="mode" class="badge">…</span>
+</header>
+<main>
+  <section class="card" aria-labelledby="h-mandate">
+    <h2 id="h-mandate">1 · Mandate (signed permission)</h2>
+    <dl id="mandate"></dl>
+    <div class="meter" aria-hidden="true"><div id="meterbar"></div></div>
+    <div id="meterlabel" class="note"></div>
+    <div class="row"><button class="danger" id="revoke">Revoke mandate</button></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-agent">
+    <h2 id="h-agent">2 · Agent proposes, the guard decides</h2>
+    <div class="row" id="scenarios"></div>
+    <label class="note" id="llmrow" hidden><input type="checkbox" id="usellm"> use a live model for the proposal (otherwise the proposal is scripted and labelled so)</label>
+    <div id="result" aria-live="polite"><p class="note">Pick a scenario. Deterministic code checks the purchase before any PayPal order exists.</p></div>
+  </section>
+
+  <section class="card wide" aria-labelledby="h-log">
+    <h2 id="h-log">3 · Flight recorder (hash-chained log)</h2>
+    <div class="tablewrap"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Event</th><th>Order</th><th>Hash</th></tr></thead><tbody id="events"></tbody></table></div>
+    <div class="note">Head hash: <span class="mono" id="head"></span></div>
+    <div class="row">
+      <button class="primary" id="verify">Verify chain</button>
+      <button id="tamper">Edit one event in the database (demo)</button>
+      <button id="reset">Reset demo</button>
+    </div>
+    <div id="verifyout" aria-live="polite"></div>
+    <p class="note">Tamper-evident, not tamper-proof: removing the newest events is only detectable against a head hash saved somewhere else.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-sum">
+    <h2 id="h-sum">4 · What was allowed vs. what happened</h2>
+    <ul class="plain" id="summary"></ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-ev">
+    <h2 id="h-ev">5 · Evidence for a dispute</h2>
+    <div class="row">
+      <button id="dl">Download evidence bundle (JSON)</button>
+      <button id="checkcur">Verify bundle offline</button>
+    </div>
+    <p class="note">The verifier recomputes every hash and the mandate signature with no database.</p>
+    <label class="note" for="disp">PayPal sandbox dispute id (to submit the bundle through the Disputes API)</label>
+    <input type="text" id="disp" placeholder="PP-D-12345">
+    <div class="row"><button id="submitev">Submit evidence to dispute</button></div>
+    <div id="evout" aria-live="polite"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const api = async (path, body) => {
+  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await r.json(); if (!r.ok) throw new Error(data.error || r.status); return data;
+};
+const money = (m, c) => (m/100).toFixed(2) + ' ' + c;
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+let badSeq = null, state = null;
+
+function renderMandate(s) {
+  const m = s.mandate, dl = $('mandate'); dl.replaceChildren();
+  const rows = [['Agent', m.agent_id], ['Purpose', m.purpose],
+    ['Budget', money(m.total_budget_minor, m.currency)], ['Per-order cap', money(m.per_order_cap_minor, m.currency)],
+    ['Needs approval above', m.approval_threshold_minor == null ? '—' : money(m.approval_threshold_minor, m.currency)],
+    ['Merchants', m.allowed_merchants.join(', ')], ['Categories', m.allowed_categories.join(', ')],
+    ['Max orders', String(m.max_orders)], ['Expires', m.expires_at],
+    ['Signature', s.signature.slice(0, 20) + '…'], ['Public key', s.public_key.slice(0, 20) + '…']];
+  rows.forEach(([k, v]) => { dl.append(el('dt', '', k), el('dd', k === 'Signature' || k === 'Public key' ? 'mono' : '', v)); });
+  const used = s.mandate_state.committed_minor;
+  $('meterbar').style.width = Math.min(100, used / m.total_budget_minor * 100) + '%';
+  $('meterlabel').textContent = `${money(used, m.currency)} of ${money(m.total_budget_minor, m.currency)} used · ${s.mandate_state.order_count}/${m.max_orders} orders` + (s.mandate_state.revoked ? ' · REVOKED' : '');
+}
+function renderEvents(s) {
+  const tb = $('events'); tb.replaceChildren();
+  s.events.forEach(e => {
+    const tr = el('tr', e.seq === badSeq ? 'bad' : '');
+    [e.seq, e.ts.replace('T', ' ').replace('Z', ''), e.type, e.order_ref || '', e.hash.slice(0, 12) + '…'].forEach((v, i) => tr.append(el('td', i === 4 ? 'mono' : '', String(v))));
+    tb.append(tr);
+  });
+  $('head').textContent = s.head_hash;
+}
+function renderSummary(s) {
+  const ul = $('summary'); ul.replaceChildren();
+  s.summary.plain_language.forEach(t => ul.append(el('li', '', t)));
+}
+async function refresh() {
+  state = await api('/api/state');
+  $('mode').textContent = state.paypal_mode === 'sandbox' ? 'PayPal sandbox (real API)' : 'PayPal simulated';
+  $('mode').className = 'badge ' + state.paypal_mode;
+  renderMandate(state); renderEvents(state); renderSummary(state);
+  $('llmrow').hidden = !state.llm_available;
+  if (!$('scenarios').children.length) {
+    Object.entries(state.scenarios).forEach(([key, title]) => {
+      const b = el('button', key === 'buy' ? 'primary' : '', title); b.onclick = () => run(key); $('scenarios').append(b);
+    });
+  }
+}
+function showResult(r) {
+  const box = $('result'); box.replaceChildren();
+  box.append(el('div', 'note', `Proposal (${r.agent}): ${r.proposal.quantity} × ${r.proposal.sku} — “${r.proposal.rationale}”`));
+  const v = el('p'); v.append(el('span', 'verdict ' + r.decision, r.decision)); box.append(v);
+  const ul = el('ul', 'codes'); r.reasons.forEach(x => { const li = el('li'); li.append(el('b', '', x.code), document.createTextNode(' ' + x.message)); ul.append(li); }); box.append(ul);
+  if (r.order_id) box.append(el('p', 'note', `PayPal ${r.paypal_mode} order created: ${r.order_id}`));
+  else if (r.status === 'DENIED') box.append(el('p', 'note', 'No PayPal order was created. PayPal was never called.'));
+  if (r.status === 'PENDING_APPROVAL') {
+    const b = el('button', 'primary', 'Approve as the person'); b.onclick = async () => { try { showResult(Object.assign({agent:r.agent, proposal:r.proposal, paypal_mode:state.paypal_mode}, await api('/api/demo/approve', {intent_id:r.intent_id}))); await refresh(); } catch (e) { box.append(el('p', 'err', e.message)); } };
+    box.append(b);
+  }
+}
+async function run(key) {
+  try { showResult(await api('/api/demo/run', {scenario:key, llm:$('usellm').checked})); badSeq = null; $('verifyout').replaceChildren(); await refresh(); }
+  catch (e) { $('result').replaceChildren(el('p', 'err', e.message)); }
+}
+function status(node, ok, text) { node.replaceChildren(el('div', 'status ' + (ok ? 'ok' : 'bad'), text)); }
+$('verify').onclick = async () => {
+  const v = await api('/api/verify'); badSeq = v.ok ? null : v.first_bad_seq; renderEvents(state);
+  status($('verifyout'), v.ok, v.ok ? `Chain intact: ${v.checked} events verified.` : `Chain BROKEN at event #${v.first_bad_seq}: ${v.problem}.`);
+};
+$('tamper').onclick = async () => { try { const t = await api('/api/demo/tamper', {}); await refresh(); status($('verifyout'), true, `Event #${t.edited_seq} was edited directly in the database. Now press “Verify chain”.`); } catch (e) { $('verifyout').replaceChildren(el('p', 'err', e.message)); } };
+$('reset').onclick = async () => { await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('result').replaceChildren(); $('evout').replaceChildren(); await refresh(); };
+$('revoke').onclick = async () => { await api('/api/demo/revoke', {}); await refresh(); };
+$('dl').onclick = async () => {
+  const b = await api('/api/bundle'); const a = el('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(b, null, 2)], {type:'application/json'}));
+  a.download = 'evidence-' + b.mandate_id + '.json'; a.click();
+};
+$('checkcur').onclick = async () => {
+  const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
+  status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' : 'Bundle FAILED: ' + r.problems.join('; '));
+};
+$('submitev').onclick = async () => {
+  try { const r = await api('/api/demo/dispute-evidence', {dispute_id:$('disp').value.trim()}); await refresh(); status($('evout'), true, 'Evidence submitted to PayPal. Bundle digest ' + r.bundle_digest.slice(0, 16) + '…'); }
+  catch (e) { status($('evout'), false, e.message); }
+};
+refresh();
+</script>
+</body>
+</html>
