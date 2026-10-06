@@ -168,3 +168,20 @@ def test_token_is_cached(orch, fake):
     orch.void("ORD1")
     orch.submit(make_intent(rationale="x"))
     assert sum(1 for c in fake.calls if c[1] == "/v1/oauth2/token") == 1
+
+
+def test_provide_evidence_multipart_shape(fake):
+    client = PayPalClient(PayPalConfig("id", "secret"), fake)
+    orig = fake.__call__
+    seen = {}
+
+    def spy(method, url, headers, body):
+        if "provide-evidence" in url:
+            seen.update(headers=dict(headers), body=body)
+            return 200, {}
+        return orig(method, url, headers, body)
+
+    client._transport = spy
+    client.provide_evidence_with_document("PP-D-1", {"evidences": []}, "e.json", b'{"a":1}')
+    assert seen["headers"]["Content-Type"].startswith("multipart/form-data; boundary=")
+    assert b'name="input"' in seen["body"] and b'filename="e.json"' in seen["body"]

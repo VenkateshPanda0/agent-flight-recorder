@@ -82,6 +82,11 @@ def urllib_transport(
         return status, {}
 
 
+def digest_boundary(content: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(content).hexdigest()[:24]
+
+
 def format_amount(minor: int, currency: str) -> str:
     """Integer minor units to PayPal's decimal string, with no floats."""
     if currency not in _EXPONENT:
@@ -155,14 +160,15 @@ class PayPalClient:
         *,
         request_id: str | None = None,
         ok: tuple[int, ...] = (200, 201, 204),
+        raw: tuple[bytes, str] | None = None,
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {self._access_token()}",
-            "Content-Type": "application/json",
+            "Content-Type": raw[1] if raw else "application/json",
         }
         if request_id:
             headers["PayPal-Request-Id"] = request_id
-        body = json.dumps(payload).encode() if payload is not None else None
+        body = raw[0] if raw else (json.dumps(payload).encode() if payload is not None else None)
         status, data = self._transport(method, f"{self._base}{path}", headers, body)
         if status not in ok:
             raise PayPalError(
@@ -260,6 +266,43 @@ class PayPalClient:
             f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/provide-evidence",
             payload,
             ok=(200, 201, 202, 204),
+        )
+
+    def provide_evidence_with_document(
+        self, dispute_id: str, payload: dict, filename: str, content: bytes
+    ) -> dict:
+        """Multipart variant: JSON ``input`` part plus one attached file."""
+        boundary = "afr" + digest_boundary(content)
+        crlf = b"\r\n"
+        parts = [
+            b"--" + boundary.encode(), b'Content-Disposition: form-data; name="input"',
+            b"Content-Type: application/json", b"", json.dumps(payload).encode(),
+            b"--" + boundary.encode(),
+            f'Content-Disposition: form-data; name="file1"; filename="{filename}"'.encode(),
+            b"Content-Type: application/json", b"", content,
+            b"--" + boundary.encode() + b"--", b"",
+        ]
+        return self._request(
+            "POST",
+            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/provide-evidence",
+            ok=(200, 201, 202, 204),
+            raw=(crlf.join(parts), f"multipart/form-data; boundary={boundary}"),
+        )
+
+    def require_evidence(self, dispute_id: str, action: str = "SELLER_EVIDENCE") -> dict:
+        """Sandbox-only helper: move a dispute into the evidence stage."""
+        return self._request(
+            "POST",
+            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/require-evidence",
+            {"action": action},
+        )
+
+    def adjudicate(self, dispute_id: str, outcome: str) -> dict:
+        """Sandbox-only helper: settle a dispute (BUYER_FAVOR or SELLER_FAVOR)."""
+        return self._request(
+            "POST",
+            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/adjudicate",
+            {"adjudication_outcome": outcome},
         )
 
     # -- webhooks ----------------------------------------------------------
