@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+
+# Local data and logs
+*.log
+*.sqlite
+*.db
+.DS_Store
+Thumbs.db

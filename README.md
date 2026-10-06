@@ -1,0 +1,72 @@
+# Agent Flight Recorder
+
+A flight recorder for purchases made by AI agents.
+
+When an AI agent buys something on a person's behalf and the person later
+disputes it, nobody can show what the agent was actually allowed to do.
+Agent Flight Recorder closes that gap:
+
+1. **Mandate.** The person grants an agent a narrow, expiring permission:
+   a budget, a per-order cap, named merchants, allowed categories and a
+   maximum number of orders. The mandate is signed, so it cannot be edited
+   afterwards.
+2. **Guard.** Every purchase the agent proposes is checked against the
+   mandate by plain, deterministic code before any PayPal order is created.
+   The verdict is allow, deny, or ask the person first, with reason codes.
+3. **Recorder.** Every step is written to an append-only, hash-chained log,
+   so later edits to the record are detectable.
+4. **Evidence.** If the buyer disputes the purchase, the mandate and the log
+   are assembled into evidence and submitted through PayPal's Disputes API.
+
+Built for the PayPal AI Hackathon. Sandbox only; no real money moves.
+
+## Status
+
+| Part | State |
+|---|---|
+| Signed mandates | Done, tested |
+| Guard with reason codes | Done, tested |
+| Tamper-evident log | Done, tested |
+| PayPal sandbox orders and webhooks | Not started |
+| Dispute evidence through the Disputes API | Not started |
+| Shopping agent | Not started |
+| Dashboard | Not started |
+
+## Run the tests
+
+Requires Python 3.10 or newer.
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in your own PayPal sandbox client ID
+and secret from the PayPal developer dashboard. `.env` is ignored by git.
+
+## Design notes
+
+- **No AI model in the enforcement path.** A model proposes a purchase; the
+  guard decides. The same inputs always give the same verdict.
+- **Money is integer minor units** (cents), never floats, so what was signed
+  is exactly what is checked.
+- **The guard uses the total computed from the line items**, not the total
+  the agent claims.
+- **Fail closed.** Anything unverifiable or out of scope is denied.
+- **Tamper-evident, not tamper-proof.** A hash chain shows edits to past
+  events. Removing the newest events is only detectable against a head hash
+  saved somewhere else, which is why the head hash is meant to be published
+  outside the database.
+
+## Tools used
+
+Built with AI assistance (Claude). Python, `cryptography` (Ed25519), SQLite,
+pytest.
+
+## Licence
+
+MIT. See `LICENSE`.

@@ -1,0 +1,15 @@
+[project]
+name = "agent-flight-recorder"
+version = "0.1.0"
+description = "Scoped mandates, a deterministic guard and a tamper-evident log for purchases made by AI agents."
+requires-python = ">=3.10"
+dependencies = [
+    "cryptography>=42",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend", "tests"]
+testpaths = ["tests"]
