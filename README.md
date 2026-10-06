@@ -20,6 +20,23 @@ Agent Flight Recorder closes that gap:
 
 Built for the PayPal AI Hackathon. Sandbox only; no real money moves.
 
+## How it works
+
+```mermaid
+flowchart LR
+    P[Person] -- signs --> M[Mandate<br/>budget, cap, merchants, expiry]
+    A[AI agent] -- proposes purchase --> G{Guard<br/>deterministic code}
+    M --> G
+    G -- DENY + reason codes --> L[(Hash-chained log)]
+    G -- ALLOW / approved --> O[PayPal Orders v2 sandbox]
+    G -- NEEDS_APPROVAL --> P
+    O --> L
+    D[PayPal dispute / webhook] --> E[Evidence bundle<br/>mandate + full log + head hash]
+    L --> E
+    E -- provide-evidence --> D
+    E --> V[Offline verifier]
+```
+
 ## Status
 
 | Part | State |
