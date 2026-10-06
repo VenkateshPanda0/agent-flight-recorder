@@ -27,7 +27,9 @@ Built for the PayPal AI Hackathon. Sandbox only; no real money moves.
 | Signed mandates | Done, tested |
 | Guard with reason codes | Done, tested |
 | Tamper-evident log | Done, tested |
-| PayPal sandbox orders and webhooks | Not started |
+| PayPal client and purchase orchestrator | Done; tested with a fake transport |
+| Real PayPal sandbox order (OAuth + Orders v2 create) | Verified 6 Oct 2026 via `scripts/sandbox_smoke.py` |
+| Webhooks | Not started |
 | Dispute evidence through the Disputes API | Not started |
 | Shopping agent | Not started |
 | Dashboard | Not started |
