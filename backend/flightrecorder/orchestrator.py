@@ -102,7 +102,10 @@ class Orchestrator:
     # -- purchases ---------------------------------------------------------
 
     def submit(self, intent: PurchaseIntent) -> Outcome:
-        iid = intent_id_of(intent)
+        try:
+            iid = intent_id_of(intent)
+        except (TypeError, ValueError):
+            return self._reject_unhashable(intent)
         with self._lock:
             if self._intent_events(iid):
                 # Replayed intent: report the earlier result, create nothing.
@@ -136,6 +139,27 @@ class Orchestrator:
             if verdict.decision is Decision.NEEDS_APPROVAL:
                 return Outcome(iid, verdict, "PENDING_APPROVAL")
             return self._create_order(iid, intent, verdict)
+
+    def _reject_unhashable(self, intent: PurchaseIntent) -> Outcome:
+        """Floats or other unsignable content: refuse, and keep a text record."""
+        from .guard import Code, Reason
+        verdict = Verdict(
+            Decision.DENY,
+            (Reason(Code.INVALID_LINE_ITEM, "Intent contains data that cannot be hashed, such as a float."),),
+        )
+        with self._lock:
+            self.ledger.append(
+                L.INTENT_SUBMITTED,
+                {"unhashable_intent": repr(intent)[:500]},
+                mandate_id=intent.mandate_id if isinstance(intent.mandate_id, str) else None,
+                ts=self._clock(),
+            )
+            self.ledger.append(
+                L.VERDICT_ISSUED, {"verdict": verdict.to_dict()},
+                mandate_id=intent.mandate_id if isinstance(intent.mandate_id, str) else None,
+                ts=self._clock(),
+            )
+        return Outcome("unhashable", verdict, "DENIED")
 
     def approve(self, intent_id: str, approver: str) -> Outcome:
         with self._lock:
