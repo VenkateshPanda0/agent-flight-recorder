@@ -110,6 +110,10 @@ def _event_hash(
     )
 
 
+# Public name so a standalone verifier can recompute hashes without a database.
+compute_event_hash = _event_hash
+
+
 class Ledger:
     def __init__(self, path: str = ":memory:") -> None:
         self._db = sqlite3.connect(path, check_same_thread=False)
