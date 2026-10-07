@@ -21,6 +21,33 @@ FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 MAX_BODY = 2_000_000
 
 
+class RateLimiter:
+    """Fixed-window limiter: per visitor and overall, for state-changing calls."""
+
+    def __init__(self, per_visitor: int = 60, overall: int = 600, window: float = 3600.0) -> None:
+        self.per_visitor, self.overall, self.window = per_visitor, overall, window
+        self._hits: dict[str, list[float]] = {}
+        self._all: list[float] = []
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, now: float | None = None) -> bool:
+        import time
+        now = time.time() if now is None else now
+        cutoff = now - self.window
+        with self._lock:
+            self._all = [t for t in self._all if t > cutoff]
+            mine = [t for t in self._hits.get(key, []) if t > cutoff]
+            if len(mine) >= self.per_visitor or len(self._all) >= self.overall:
+                self._hits[key] = mine
+                return False
+            mine.append(now)
+            self._all.append(now)
+            self._hits[key] = mine
+            if len(self._hits) > 5000:  # bound memory
+                self._hits = {k: v for k, v in self._hits.items() if v and v[-1] > cutoff}
+            return True
+
+
 class Sessions:
     """One demo per visitor (cookie), so simultaneous visitors cannot reset
     or tamper with each other's demo. Oldest sessions are dropped at the cap."""
@@ -42,7 +69,8 @@ class Sessions:
             return sid, self._items[sid]
 
 
-def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_actions: bool):
+def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_actions: bool,
+                 limiter: RateLimiter | None = None, allow_dispute_submit: bool = False):
     class Handler(BaseHTTPRequestHandler):
         server_version = "AFR/0.1"
 
@@ -59,7 +87,9 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             if getattr(self, "_sid", None):
-                self.send_header("Set-Cookie", f"afr_sid={self._sid}; Path=/; HttpOnly; SameSite=Lax")
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+                self.send_header("Set-Cookie",
+                                 f"afr_sid={self._sid}; Path=/; HttpOnly; SameSite=Lax{secure}")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
@@ -114,6 +144,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                                                              data.get("expected_head_hash")))
                 if not demo_actions:
                     return self._json(403, {"error": "demo actions are disabled"})
+                if limiter is not None and not limiter.allow(self._sid):
+                    return self._json(429, {"error": "too many demo actions; try again later"})
                 if path == "/api/demo/run":
                     if data.get("scenario") not in SCENARIOS:
                         return self._json(400, {"error": "unknown scenario"})
@@ -129,6 +161,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                     app.reset()
                     return self._json(200, {"ok": True})
                 if path == "/api/demo/dispute-evidence":
+                    if not allow_dispute_submit:
+                        return self._json(403, {"error": "dispute submission is disabled on this deployment"})
                     dispute_id = str(data.get("dispute_id", ""))
                     res = app.disputes.submit_evidence(dispute_id, app.signed)
                     return self._json(200, {"bundle_digest": res["bundle_digest"]})
@@ -150,7 +184,9 @@ def main(argv: list[str] | None = None) -> None:
     owner = DemoApp(client=client, paypal_mode=mode, allow_tamper=False)
     webhook_id = os.environ.get("PAYPAL_WEBHOOK_ID")
     webhooks = WebhookProcessor(owner.ledger, client, webhook_id, owner.disputes) if webhook_id else None
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(sessions, webhooks, demo_actions))
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(
+        sessions, webhooks, demo_actions, RateLimiter(),
+        allow_dispute_submit=os.environ.get("ALLOW_DISPUTE_SUBMIT") == "1"))
     print(f"Agent Flight Recorder on :{port} (PayPal: {mode})", file=sys.stderr)
     server.serve_forever()
 

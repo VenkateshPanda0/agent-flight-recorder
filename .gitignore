@@ -17,3 +17,5 @@ __pycache__/
 *.db
 .DS_Store
 Thumbs.db
+.afr_flow.json
+.afr_flow.sqlite

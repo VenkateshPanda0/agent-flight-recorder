@@ -76,3 +76,25 @@ def test_opening_twice_logs_once(setup):
     orch, handler, _, _ = setup
     handler.open("PP-D-1"); handler.open("PP-D-1")
     assert sum(e.type == L.DISPUTE_OPENED for e in orch.ledger.events()) == 1
+
+
+def test_create_dispute_sends_buyer_assertion_and_amount():
+    import base64
+    from test_orchestrator import FakePayPal
+    fake = FakePayPal()
+    seen = {}
+    orig = fake.__call__
+
+    def spy(method, url, headers, body):
+        if url.endswith("/v1/customer/disputes"):
+            seen.update(h=dict(headers), b=json.loads(body))
+            return 201, {"links": [{"rel": "self", "href": "https://x/v1/customer/disputes/PP-D-9"}]}
+        return orig(method, url, headers, body)
+
+    client = PayPalClient(PayPalConfig("my-client", "secret"), spy)
+    client.create_dispute(buyer_transaction_id="CAP1", reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+                          amount_minor=8999, currency="USD", buyer_payer_id="PAYER1")
+    head, claims, sig = seen["h"]["PayPal-Auth-Assertion"].split(".")
+    pad = lambda s: s + "=" * (-len(s) % 4)
+    assert json.loads(base64.urlsafe_b64decode(pad(claims))) == {"iss": "my-client", "payer_id": "PAYER1"}
+    assert sig == "" and seen["b"]["dispute_amount"]["value"] == "89.99"

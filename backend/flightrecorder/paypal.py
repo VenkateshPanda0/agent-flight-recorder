@@ -161,6 +161,7 @@ class PayPalClient:
         request_id: str | None = None,
         ok: tuple[int, ...] = (200, 201, 204),
         raw: tuple[bytes, str] | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {self._access_token()}",
@@ -168,6 +169,8 @@ class PayPalClient:
         }
         if request_id:
             headers["PayPal-Request-Id"] = request_id
+        if extra_headers:
+            headers.update(extra_headers)
         body = raw[0] if raw else (json.dumps(payload).encode() if payload is not None else None)
         status, data = self._transport(method, f"{self._base}{path}", headers, body)
         if status not in ok:
@@ -289,6 +292,30 @@ class PayPalClient:
             raw=(crlf.join(parts), f"multipart/form-data; boundary={boundary}"),
         )
 
+    def create_dispute(self, *, buyer_transaction_id: str, reason: str, amount_minor: int,
+                       currency: str, buyer_payer_id: str, note: str = "") -> dict:
+        """Sandbox: open a dispute as the buyer. PayPal requires an auth
+        assertion naming the buyer; it is an unsigned JWT built from the
+        app's client id and the buyer's payer id."""
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).rstrip(b"=")
+        claims = base64.urlsafe_b64encode(json.dumps(
+            {"iss": self._config.client_id, "payer_id": buyer_payer_id}).encode()).rstrip(b"=")
+        assertion = (header + b"." + claims + b".").decode()
+        payload = {
+            "disputed_transactions": [{"buyer_transaction_id": buyer_transaction_id}],
+            "reason": reason,
+            "dispute_amount": {"currency_code": currency, "value": format_amount(amount_minor, currency)},
+            "extensions": {"merchant_contacted": True, "merchant_contacted_outcome": "NO_RESPONSE",
+                           "buyer_contacted_time": "2026-10-01T00:00:00.000Z",
+                           "merchandize_dispute_properties": {"issue_type": "PRODUCT"}},
+        }
+        if note:
+            payload["messages"] = [{"posted_by": "BUYER", "content": note[:2000]}]
+        return self._request(
+            "POST", "/v1/customer/disputes", payload,
+            extra_headers={"PayPal-Auth-Assertion": assertion},
+        )
+
     def require_evidence(self, dispute_id: str, action: str = "SELLER_EVIDENCE") -> dict:
         """Sandbox-only helper: move a dispute into the evidence stage."""
         return self._request(
@@ -303,6 +330,12 @@ class PayPalClient:
             "POST",
             f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/adjudicate",
             {"adjudication_outcome": outcome},
+        )
+
+    def create_webhook(self, url: str, event_types: list[str]) -> dict:
+        return self._request(
+            "POST", "/v1/notifications/webhooks",
+            {"url": url, "event_types": [{"name": n} for n in event_types]},
         )
 
     # -- webhooks ----------------------------------------------------------

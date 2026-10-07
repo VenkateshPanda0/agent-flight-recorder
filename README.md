@@ -53,6 +53,9 @@ flowchart LR
 | Dashboard and demo server | Done |
 | Shopping agent | Scripted proposer always; live-model proposer written, needs `ANTHROPIC_API_KEY` |
 
+`scripts/sandbox_dispute_flow.py start|finish` runs the real order, capture,
+dispute and evidence chain once a sandbox buyer has approved the order.
+
 Order capture needs a sandbox buyer to approve the order in a browser, so
 captured orders and live disputes are not exercised automatically.
 
@@ -70,7 +73,9 @@ DEMO_PAYPAL=simulated PYTHONPATH=backend python -m flightrecorder.server   # htt
 ```
 
 On Windows PowerShell use `$env:DEMO_PAYPAL="simulated"; $env:PYTHONPATH="backend"; python -m flightrecorder.server`.
-Without `DEMO_PAYPAL=simulated` and with sandbox credentials in `.env`, the
+Dispute submission from the dashboard is off unless `ALLOW_DISPUTE_SUBMIT=1`
+(so a public deployment cannot spend your PayPal credentials); demo actions are
+rate limited. Without `DEMO_PAYPAL=simulated` and with sandbox credentials in `.env`, the
 demo creates real PayPal **sandbox** orders; the page shows which mode is active.
 
 ## Red-team results

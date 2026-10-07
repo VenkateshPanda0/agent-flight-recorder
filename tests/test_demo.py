@@ -56,3 +56,25 @@ def test_http_roundtrip():
     assert not json.load(opener.open(base + "/api/verify"))["ok"]
     assert json.load(other.open(base + "/api/verify"))["ok"]
     srv.shutdown()
+
+
+def test_rate_limiter_blocks_per_visitor_and_overall():
+    from flightrecorder.server import RateLimiter
+    rl = RateLimiter(per_visitor=2, overall=3, window=10)
+    assert rl.allow("a", 0) and rl.allow("a", 1) and not rl.allow("a", 2)
+    assert rl.allow("b", 3) and not rl.allow("c", 4)       # overall cap of 3 reached
+    assert rl.allow("a", 20)                                 # window passed
+
+
+def test_dispute_submit_disabled_by_default():
+    import json, threading, urllib.error, urllib.request
+    from http.server import ThreadingHTTPServer
+    from flightrecorder.server import Sessions, make_handler
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(Sessions(lambda: DemoApp(use_real_paypal=False)), None, True))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/demo/dispute-evidence",
+                                 json.dumps({"dispute_id": "PP-D-1"}).encode(), {"Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req)
+    assert e.value.code == 403
+    srv.shutdown()
