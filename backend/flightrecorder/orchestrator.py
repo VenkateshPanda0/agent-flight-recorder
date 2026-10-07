@@ -107,7 +107,8 @@ class Orchestrator:
         except (TypeError, ValueError):
             return self._reject_unhashable(intent)
         with self._lock:
-            if self._intent_events(iid):
+            earlier = self._intent_events(iid)
+            if earlier and not self._failed_before_order(earlier):
                 # Replayed intent: report the earlier result, create nothing.
                 return self._existing_outcome(iid)
 
@@ -296,6 +297,16 @@ class Orchestrator:
             e for e in self.ledger.events()
             if e.payload.get("intent_id") == iid
         ]
+
+    @staticmethod
+    def _failed_before_order(events: list[L.Event]) -> bool:
+        """True if the last attempt died at PayPal, so a retry is safe.
+
+        The same intent id is reused as PayPal-Request-Id, so even if the
+        first call actually succeeded on PayPal's side, no second order forms.
+        """
+        types = [e.type for e in events]
+        return L.ORDER_FAILED in types and L.ORDER_CREATED not in types
 
     def _existing_outcome(self, iid: str) -> Outcome:
         events = self._intent_events(iid)

@@ -185,3 +185,14 @@ def test_provide_evidence_multipart_shape(fake):
     client.provide_evidence_with_document("PP-D-1", {"evidences": []}, "e.json", b'{"a":1}')
     assert seen["headers"]["Content-Type"].startswith("multipart/form-data; boundary=")
     assert b'name="input"' in seen["body"] and b'filename="e.json"' in seen["body"]
+
+
+def test_failed_paypal_call_can_be_retried_with_same_request_id(orch, fake):
+    fake.fail_orders = True
+    assert orch.submit(make_intent()).status == "ORDER_FAILED"
+    fake.fail_orders = False
+    out = orch.submit(make_intent())
+    assert out.status == "ORDER_CREATED"
+    ids = {c[3].get("PayPal-Request-Id") for c in fake.order_posts()}
+    assert len(ids) == 1 and None not in ids          # PayPal deduplicates on this
+    assert orch.submit(make_intent()).status == "DUPLICATE"

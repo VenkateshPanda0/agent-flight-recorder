@@ -10,7 +10,9 @@ Non-obvious choices, so they can be explained and challenged.
    call; a denied purchase makes no network call at all (tested).
 4. **Replayed intents are idempotent.** The intent id is the hash of the
    intent. Re-submitting returns the earlier result and creates no second
-   order. The id is also sent as `PayPal-Request-Id`.
+   order. The id is also sent as `PayPal-Request-Id`. If the earlier attempt
+   failed at PayPal (`ORDER_FAILED`), the same intent may be retried; the shared
+   request id means PayPal still creates at most one order.
 5. **Approval re-runs the guard.** A human "yes" cannot override a revoked
    mandate, an expired one, or a blown cap.
 6. **Budget is reserved at order creation** and released by void, refund or a
@@ -31,3 +33,6 @@ Non-obvious choices, so they can be explained and challenged.
     and the bundle together is only caught by a head hash or public key
     obtained elsewhere; `verify_bundle` takes both for that reason.
 12. **Sandbox only.** `PayPalClient` refuses any base URL except the sandbox.
+13. **Public demo is rate limited and cannot spend credentials.** Demo actions are
+    limited per visitor and overall; dispute submission from the dashboard is off
+    unless `ALLOW_DISPUTE_SUBMIT=1`; each visitor gets an isolated in-memory demo.
