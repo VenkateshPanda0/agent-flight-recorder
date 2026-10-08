@@ -21,10 +21,11 @@ Python standard library plus `cryptography` (Ed25519). PayPal Orders v2 and OAut
 - Sandbox constraints: the sandbox business account was not enabled for card payments, so capturing an order needs a sandbox buyer to approve it in a browser.
 
 ### Accomplishments (measured)
-- 135 automated tests.
+- 136 automated tests.
 - Red-team suite: 27 of 27 attack scenarios blocked (prompt injection, inflated totals, lookalike merchants, replay, order splitting, forged mandates, and more). Two in-scope cases are intentionally not blocked and are reported. The scenarios were written by the same author as the guard, so this is a regression suite, not independent testing.
 - 8 tamper cases against the offline verifier (edited event, reordered, removed, edited mandate, forged key, wrong key, truncated tail, edited summary).
 - Real PayPal sandbox orders created end to end through the guard and ledger.
+- Dispute evidence submission is implemented against PayPal's documented Disputes API but has only been tested against a fake transport, not a live sandbox dispute. Say this plainly in the final text unless a real dispute is run first.
 
 ### What I learned
 The interesting problem in agentic commerce is not getting an agent to pay; it is being able to show afterwards what it was allowed to do.
@@ -45,7 +46,7 @@ This project was built with AI assistance (Claude Code). Sandbox only; no real m
 4. 1:05 Click "Injected listing": agent proposes five gift cards; DENY with four reason codes; "PayPal was never called".
 5. 1:30 Dispute: build the evidence bundle; submit it to a real sandbox dispute (record only if the dispute is real; otherwise show the bundle and offline verification and say plainly it is not yet submitted).
 6. 2:00 "Edit one event in the database", then Verify chain: it fails at the exact event. Say the head-hash limit in one sentence.
-7. 2:30 Numbers: 135 tests, red-team 27/27, repo link.
+7. 2:30 Numbers: 136 tests, red-team 27/27, repo link.
 Check the screen for secrets, emails and tokens before uploading. 1080p, public, "Not for Kids", upload at least a day early.
 
 ## Checklist
