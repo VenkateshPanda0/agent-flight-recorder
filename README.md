@@ -78,6 +78,17 @@ Dispute submission from the dashboard is off unless `ALLOW_DISPUTE_SUBMIT=1`
 rate limited. Without `DEMO_PAYPAL=simulated` and with sandbox credentials in `.env`, the
 demo creates real PayPal **sandbox** orders; the page shows which mode is active.
 
+## Verify a bundle yourself
+
+Download a bundle from the dashboard, then, with no server and no network:
+
+```bash
+python scripts/verify_bundle.py evidence-<mandate>.json --key <public key> --head <saved head hash>
+```
+
+Without `--head`, removal of the newest events cannot be detected; without
+`--key`, the signer is not checked. The script says so when either is missing.
+
 ## Red-team results
 
 `python scripts/redteam_report.py` runs adversarial scenarios through the real

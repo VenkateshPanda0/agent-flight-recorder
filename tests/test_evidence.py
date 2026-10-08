@@ -121,3 +121,18 @@ def test_edited_summary_detected(bundle):
 def test_garbage_does_not_raise():
     assert not verify_bundle({}).ok
     assert not verify_bundle({"signed_mandate": 5}).ok
+
+
+def test_cli_verifier_exit_codes(tmp_path, bundle, world):
+    import subprocess, sys
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[1] / "scripts" / "verify_bundle.py"
+    good = tmp_path / "good.json"; good.write_text(json.dumps(bundle))
+    bad_b = copy.deepcopy(bundle); bad_b["events"][3]["payload"]["x"] = 1
+    bad = tmp_path / "bad.json"; bad.write_text(json.dumps(bad_b))
+    pub = world[2]
+    ok = subprocess.run([sys.executable, str(script), str(good), "--key", pub, "--head", bundle["head_hash"]],
+                        capture_output=True, text=True)
+    assert ok.returncode == 0 and "bundle verifies" in ok.stdout
+    no = subprocess.run([sys.executable, str(script), str(bad)], capture_output=True, text=True)
+    assert no.returncode == 1 and "FAILED" in no.stdout
