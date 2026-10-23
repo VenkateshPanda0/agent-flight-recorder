@@ -232,5 +232,63 @@ def run_all() -> dict:
     }
 
 
+def _leaf_paths(node, path=()):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _leaf_paths(v, path + (k,))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _leaf_paths(v, path + (i,))
+    else:
+        yield path
+
+
+def _get(node, path):
+    for k in path:
+        node = node[k]
+    return node
+
+
+def _mutated_leaf(value):
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, int):
+        return value + 1
+    if value is None:
+        return "x"
+    return str(value) + "x"
+
+
+def tamper_sweep() -> dict:
+    """Mutate every single leaf of a real bundle, and delete or swap events,
+    and count how many edits the offline verifier catches."""
+    import copy
+
+    from .evidence import build_bundle, verify_bundle
+
+    w = world()
+    w.orch.submit(intent())
+    w.orch.submit(intent(merchant_id="evil.example"))
+    w.orch.submit(intent(items=(LineItem("Pro shoe", "footwear", 13_000, 1),)))
+    bundle = json.loads(json.dumps(build_bundle(w.orch.ledger, sign_mandate(w.mandate, w.key))))
+    assert verify_bundle(bundle, trusted_public_key=w.pub).ok
+
+    cases = []
+    for path in _leaf_paths(bundle):
+        mutated = copy.deepcopy(bundle)
+        parent = _get(mutated, path[:-1])
+        parent[path[-1]] = _mutated_leaf(parent[path[-1]])
+        cases.append(("edit " + ".".join(map(str, path)), mutated))
+    for i in range(len(bundle["events"])):
+        m = copy.deepcopy(bundle); del m["events"][i]
+        cases.append((f"delete event {i}", m))
+    for i in range(len(bundle["events"]) - 1):
+        m = copy.deepcopy(bundle); m["events"][i], m["events"][i + 1] = m["events"][i + 1], m["events"][i]
+        cases.append((f"swap events {i},{i + 1}", m))
+    missed = [name for name, m in cases
+              if verify_bundle(m, trusted_public_key=w.pub).ok]
+    return {"total": len(cases), "detected": len(cases) - len(missed), "missed": missed}
+
+
 if __name__ == "__main__":
     print(json.dumps(run_all(), indent=2))

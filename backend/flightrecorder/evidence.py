@@ -106,7 +106,6 @@ def build_bundle(ledger: Ledger, signed: SignedMandate) -> dict:
         "mandate_digest": signed.mandate.digest(),
         "events": events,
         "head_hash": head,
-        "ledger_self_check": {"ok": ledger.verify().ok},
         "summary": summarise(signed.mandate.to_payload(), events),
     }
 
@@ -143,6 +142,8 @@ def verify_bundle(
 
 
 def _verify(bundle, check, trusted_key, expected_head):
+    if bundle["bundle_version"] != BUNDLE_VERSION:
+        check.fail("unsupported bundle version")
     signed = SignedMandate.from_dict(bundle["signed_mandate"])
     mandate_id = signed.mandate.mandate_id
 

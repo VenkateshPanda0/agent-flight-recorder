@@ -101,6 +101,17 @@ scenarios inside the mandate's scope are **not** blocked, on purpose: an
 overpriced but permitted item at an allowed merchant, and injected text in an
 item name on an otherwise valid order. The mandate allowed those purchases.
 
+Two further measured checks, both in the test suite:
+
+- **Bundle tamper sweep:** every single-field edit, event deletion and adjacent
+  swap on a real evidence bundle (209 edits in total) is detected by the offline
+  verifier: **209/209**.
+- **Guard vs. an independent oracle:** 5,000 seeded random mandates, intents and
+  states (1,527 allow, 306 needs-approval, 3,167 deny). The guard's decision and
+  its exact reason codes matched the oracle in all 5,000. The oracle is a second
+  statement of the rules by the same author, so it catches implementation slips,
+  not a wrong reading of the rules.
+
 Caveat: the scenarios were written by the same author as the guard, so this
 is a regression suite, not independent testing.
 

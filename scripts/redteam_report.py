@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
-from flightrecorder.redteam import run_all
+from flightrecorder.redteam import run_all, tamper_sweep
 
 r = run_all()
 print(f"Attack scenarios: {r['attacks']}   blocked (no PayPal order beyond the one legitimate order): {r['blocked']}")
@@ -19,3 +19,8 @@ for x in r["results"]:
         c = by_cat.setdefault(x["category"], [0, 0]); c[0] += x["blocked"]; c[1] += 1
 for cat, (b, n) in sorted(by_cat.items()):
     print(f"  {cat}: {b}/{n}")
+
+t = tamper_sweep()
+print(f"Bundle tamper sweep: {t['detected']}/{t['total']} single edits, deletions and swaps detected by the offline verifier")
+for name in t["missed"]:
+    print("UNDETECTED:", name)
