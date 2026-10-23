@@ -86,6 +86,7 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
     <div class="note">Head hash: <span class="mono" id="head"></span></div>
     <div class="row">
       <button class="primary" id="verify">Verify chain</button>
+      <button id="anchor">Anchor head hash (independent timestamp)</button>
       <button id="tamper">Edit one event in the database (demo)</button>
       <button id="reset">Reset demo</button>
     </div>
@@ -180,6 +181,13 @@ $('verify').onclick = async () => {
   const v = await api('/api/verify'); badSeq = v.ok ? null : v.first_bad_seq; renderEvents(state);
   status($('verifyout'), v.ok, v.ok ? `Chain intact: ${v.checked} events verified.` : `Chain BROKEN at event #${v.first_bad_seq}: ${v.problem}.`);
 };
+$('anchor').onclick = async () => {
+  $('anchor').disabled = true;
+  try { const a = await api('/api/demo/anchor', {}); await refresh();
+    status($('verifyout'), true, `Head hash anchored by an independent timestamp authority (RFC 3161): ${a.gen_time}. Events up to #${a.event_seq - 1} can no longer be edited or removed without this stamp exposing it.`); }
+  catch (e) { status($('verifyout'), false, 'Anchoring failed: ' + e.message); }
+  $('anchor').disabled = false;
+};
 $('tamper').onclick = async () => { try { const t = await api('/api/demo/tamper', {}); await refresh(); status($('verifyout'), true, `Event #${t.edited_seq} was edited directly in the database. Now press “Verify chain”.`); } catch (e) { $('verifyout').replaceChildren(el('p', 'err', e.message)); } };
 $('reset').onclick = async () => { await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('result').replaceChildren(); $('evout').replaceChildren(); await refresh(); };
 $('revoke').onclick = async () => { await api('/api/demo/revoke', {}); await refresh(); };
@@ -189,7 +197,8 @@ $('dl').onclick = async () => {
 };
 $('checkcur').onclick = async () => {
   const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
-  status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' : 'Bundle FAILED: ' + r.problems.join('; '));
+  const anchors = r.anchors && r.anchors.length ? ` ${r.anchors.length} independent timestamp(s) checked (latest ${r.anchors[r.anchors.length-1].gen_time}); ${r.events_after_last_anchor} event(s) after the last one are not pinned.` : ' No independent timestamp yet: use “Anchor head hash” first.';
+  status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
 };
 $('submitev').onclick = async () => {
   try { const r = await api('/api/demo/dispute-evidence', {dispute_id:$('disp').value.trim()}); await refresh(); status($('evout'), true, 'Evidence submitted to PayPal. Bundle digest ' + r.bundle_digest.slice(0, 16) + '…'); }

@@ -118,6 +118,8 @@ class BundleCheck:
     signature_ok: bool = False
     chain_ok: bool = False
     head_hash: str | None = None
+    anchors: list[dict] = field(default_factory=list)
+    events_after_last_anchor: int | None = None
 
     def fail(self, message: str, seq: int | None = None) -> None:
         self.ok = False
@@ -131,17 +133,22 @@ def verify_bundle(
     *,
     trusted_public_key: str | None = None,
     expected_head_hash: str | None = None,
+    verify_anchors: bool = False,
 ) -> BundleCheck:
-    """Check a bundle with no database. Never raises on malformed input."""
+    """Check a bundle with no database. Never raises on malformed input.
+
+    With ``verify_anchors`` any timestamp-authority tokens in the log are
+    checked too (needs the ``openssl`` command); one that fails fails the bundle.
+    """
     check = BundleCheck()
     try:
-        _verify(bundle, check, trusted_public_key, expected_head_hash)
+        _verify(bundle, check, trusted_public_key, expected_head_hash, verify_anchors)
     except (KeyError, TypeError, ValueError, AttributeError, IndexError) as error:
         check.fail(f"bundle is malformed ({type(error).__name__})")
     return check
 
 
-def _verify(bundle, check, trusted_key, expected_head):
+def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
     if bundle["bundle_version"] != BUNDLE_VERSION:
         check.fail("unsupported bundle version")
     signed = SignedMandate.from_dict(bundle["signed_mandate"])
@@ -198,5 +205,33 @@ def _verify(bundle, check, trusted_key, expected_head):
     if chain_ok and bundle["summary"] != summarise(signed.mandate.to_payload(), events):
         check.fail("summary does not match the events")
 
+    if chain_ok:
+        _check_anchors(events, check, verify_anchors)
+
     # Canonical form must be hashable; this also rejects smuggled floats.
     digest(bundle["signed_mandate"])
+
+
+def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool) -> None:
+    import base64
+
+    from .anchor import ANCHOR_RECORDED, verify_token
+
+    last_seq = events[-1]["seq"] if events else 0
+    for ev in events:
+        if ev["type"] != ANCHOR_RECORDED:
+            continue
+        p = ev["payload"]
+        entry = {"seq": ev["seq"], "gen_time": p.get("gen_time"), "tsa": p.get("tsa"),
+                 "verified": None}
+        if p["anchored_hash"] != ev["prev_hash"]:
+            check.fail("anchor record does not match its position in the chain", ev["seq"])
+        elif verify_anchors:
+            res = verify_token(p["anchored_hash"], base64.b64decode(p["token_b64"]))
+            entry["verified"] = res.ok
+            entry["gen_time"] = res.gen_time or entry["gen_time"]
+            if not res.ok:
+                check.fail(f"timestamp anchor at event #{ev['seq']}: {res.detail}", ev["seq"])
+        check.anchors.append(entry)
+    check.events_after_last_anchor = (
+        last_seq - check.anchors[-1]["seq"] if check.anchors else last_seq)

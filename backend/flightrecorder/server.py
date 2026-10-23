@@ -13,6 +13,7 @@ import threading
 from collections import OrderedDict
 
 from .demo import SCENARIOS, DemoApp, make_shared_client
+from .anchor import AnchorError
 from .orchestrator import OrchestratorError
 from .paypal import PayPalError
 from .webhooks import WebhookProcessor
@@ -155,6 +156,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                 if path == "/api/demo/revoke":
                     app.revoke()
                     return self._json(200, {"ok": True})
+                if path == "/api/demo/anchor":
+                    return self._json(200, app.anchor())
                 if path == "/api/demo/tamper":
                     return self._json(200, app.tamper())
                 if path == "/api/demo/reset":
@@ -167,7 +170,7 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                     res = app.disputes.submit_evidence(dispute_id, app.signed)
                     return self._json(200, {"bundle_digest": res["bundle_digest"]})
                 return self._json(404, {"error": "not found"})
-            except (OrchestratorError, PayPalError, KeyError, ValueError, RuntimeError, PermissionError) as exc:
+            except (OrchestratorError, AnchorError, PayPalError, KeyError, ValueError, RuntimeError, PermissionError) as exc:
                 return self._json(400, {"error": str(exc)[:300]})
             except Exception:  # never leak internals
                 return self._json(500, {"error": "internal error"})

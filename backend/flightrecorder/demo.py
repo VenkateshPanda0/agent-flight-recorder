@@ -89,7 +89,10 @@ class DemoApp:
         self.ledger = Ledger()
         self.orch = Orchestrator(self.ledger, self._client, trusted_public_key=self.public_key)
         self.orch.grant(self.signed)
-        self.disputes = DisputeHandler(self.ledger, self._client)
+        from .anchor import anchor_ledger
+        self.disputes = DisputeHandler(
+            self.ledger, self._client,
+            anchor=anchor_ledger if self.paypal_mode == "sandbox" else None)
         self.last_agent_label = None
 
     # -- actions ---------------------------------------------------------------
@@ -129,9 +132,16 @@ class DemoApp:
                 "problem": check.problem, "head_hash": self.ledger.head_hash()}
 
     def verify_bundle(self, bundle: dict, expected_head: str | None = None) -> dict:
-        c = verify_bundle(bundle, trusted_public_key=self.public_key, expected_head_hash=expected_head)
+        c = verify_bundle(bundle, trusted_public_key=self.public_key, expected_head_hash=expected_head,
+                          verify_anchors=True)
         return {"ok": c.ok, "problems": c.problems, "first_bad_seq": c.first_bad_seq,
-                "signature_ok": c.signature_ok, "chain_ok": c.chain_ok}
+                "signature_ok": c.signature_ok, "chain_ok": c.chain_ok, "anchors": c.anchors,
+                "events_after_last_anchor": c.events_after_last_anchor}
+
+    def anchor(self) -> dict:
+        """Timestamp the current head hash with an independent authority."""
+        from .anchor import anchor_ledger
+        return anchor_ledger(self.ledger)
 
     def tamper(self) -> dict:
         """Demo only: rewrite the amount in the first ORDER_CREATED event

@@ -129,6 +129,14 @@ and secret from the PayPal developer dashboard. `.env` is ignored by git.
 - **The guard uses the total computed from the line items**, not the total
   the agent claims.
 - **Fail closed.** Anything unverifiable or out of scope is denied.
+- **Independent timestamp anchoring (RFC 3161).** `Anchor head hash` asks a public
+  timestamp authority (DigiCert's free service) to sign the log's head hash and
+  records the token in the log. Anyone can check it offline with `openssl`
+  (`scripts/verify_bundle.py` does). Events up to an anchor cannot be edited or
+  removed without contradicting a third party's signed time. The limits: events
+  after the latest anchor are not pinned (the verifier reports how many), and if
+  someone truncates a bundle to before its anchor, the anchor is simply absent,
+  so keep the anchored hash somewhere else (the dispute notes carry it).
 - **Tamper-evident, not tamper-proof.** A hash chain shows edits to past
   events. Removing the newest events is only detectable against a head hash
   saved somewhere else, which is why the head hash is meant to be published

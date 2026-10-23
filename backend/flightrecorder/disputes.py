@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Callable
 
 from . import ledger as L
+from .anchor import AnchorError
 from .canonical import digest
 from .evidence import build_bundle
 from .ledger import Ledger
@@ -29,8 +30,12 @@ class DisputeError(Exception):
 
 class DisputeHandler:
     def __init__(self, ledger: Ledger, paypal: PayPalClient,
-                 clock: Callable[[], datetime] = utc_now) -> None:
-        self.ledger, self.paypal, self._clock = ledger, paypal, clock
+                 clock: Callable[[], datetime] = utc_now,
+                 anchor: Callable[[Ledger], dict] | None = None) -> None:
+        """``anchor`` (e.g. ``anchor_ledger``) timestamps the log head before
+        evidence is built. Off by default so nothing touches the network
+        unless it is wired in on purpose."""
+        self.ledger, self.paypal, self._clock, self._anchor = ledger, paypal, clock, anchor
 
     def _order_for_dispute(self, dispute: dict) -> tuple[str, str, str]:
         """Return (order_ref, mandate_id, capture_id) for a dispute."""
@@ -65,10 +70,18 @@ class DisputeHandler:
         info = self.open(dispute_id)
         if info["mandate_id"] != signed.mandate.mandate_id:
             raise DisputeError("Dispute belongs to a different mandate.")
+        anchor_note = ""
+        try:  # best effort: pin the log head with an independent timestamp first
+            a = self._anchor(self.ledger) if self._anchor else None
+            if a is None:
+                raise AnchorError("anchoring disabled")
+            anchor_note = f"\nIndependent timestamp on the log: {a['gen_time']} (RFC 3161)."
+        except AnchorError:
+            pass
         bundle = build_bundle(self.ledger, signed)
         content = json.dumps(bundle, sort_keys=True).encode()
         bundle_digest = digest(bundle)
-        notes = self._notes(bundle, bundle_digest, info["order_ref"])
+        notes = self._notes(bundle, bundle_digest, info["order_ref"], anchor_note)
         payload = {"evidences": [{"evidence_type": "OTHER", "notes": notes}]}
         response = self.paypal.provide_evidence_with_document(
             dispute_id, payload, f"evidence-{signed.mandate.mandate_id}.json", content
@@ -82,9 +95,9 @@ class DisputeHandler:
         return {"response": response, "bundle": bundle, "bundle_digest": bundle_digest}
 
     @staticmethod
-    def _notes(bundle: dict, bundle_digest: str, order_ref: str) -> str:
+    def _notes(bundle: dict, bundle_digest: str, order_ref: str, anchor_note: str = "") -> str:
         tail = (f"\nLog head hash: {bundle['head_hash']}\nBundle digest: {bundle_digest}\n"
-                f"Order: {order_ref}\nThe attached JSON file can be verified offline.")
+                f"Order: {order_ref}{anchor_note}\nThe attached JSON file can be verified offline.")
         lines = "\n".join(bundle["summary"]["plain_language"])
         room = NOTES_LIMIT - len(tail)
         if len(lines) > room:

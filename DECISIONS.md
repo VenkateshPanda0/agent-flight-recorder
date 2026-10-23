@@ -36,3 +36,9 @@ Non-obvious choices, so they can be explained and challenged.
 13. **Public demo is rate limited and cannot spend credentials.** Demo actions are
     limited per visitor and overall; dispute submission from the dashboard is off
     unless `ALLOW_DISPUTE_SUBMIT=1`; each visitor gets an isolated in-memory demo.
+14. **Timestamp anchoring instead of our own "publish the hash" scheme.** An RFC 3161
+    authority needs no account, is independent of us, and its tokens verify offline
+    with `openssl`. The request is built in pure Python (checked byte-for-byte against
+    `openssl ts -query`); verification shells out to `openssl` and reports "not
+    verified" if it is missing. A token is verified before it is logged. Anchoring is
+    off in tests and in simulated mode so nothing touches the network by accident.

@@ -23,10 +23,18 @@ try:
     bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
 except (OSError, ValueError) as exc:
     raise SystemExit(f"cannot read bundle: {type(exc).__name__}")
-check = verify_bundle(bundle, trusted_public_key=args.key, expected_head_hash=args.head)
+check = verify_bundle(bundle, trusted_public_key=args.key, expected_head_hash=args.head,
+                      verify_anchors=True)
 print("signature:", "valid" if check.signature_ok else "INVALID")
 print("hash chain:", "intact" if check.chain_ok else "BROKEN")
 print("head hash:", check.head_hash)
+if check.anchors:
+    for a in check.anchors:
+        state = {True: "verified", False: "FAILED", None: "not checked"}[a["verified"]]
+        print(f"anchor at event #{a['seq']}: {state}, independent timestamp {a['gen_time']} ({a['tsa']})")
+    print(f"events after the last anchor (not independently pinned): {check.events_after_last_anchor}")
+else:
+    print("no external timestamp anchors in this bundle: removal of the newest events is undetectable without --head")
 if not args.head:
     print("note: no --head given, so removal of the newest events cannot be detected")
 if not args.key:

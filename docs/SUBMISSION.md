@@ -15,13 +15,16 @@ Agent Flight Recorder sits between an AI shopping agent and PayPal.
 ### How I built it
 Python standard library plus `cryptography` (Ed25519). PayPal Orders v2 and OAuth against the sandbox, Customer Disputes `provide-evidence` (multipart), and webhook signature verification. Money is integer minor units, never floats. A single-page dashboard shows the mandate, the guard's verdicts and the hash chain, with a Verify button.
 
+### Anchoring
+The log head hash can be stamped by an independent RFC 3161 timestamp authority, so edits to anything before the stamp are caught by a third party's signature, and the offline verifier reports how many newer events are not yet pinned.
+
 ### Challenges
 - Making a hash chain verifiable without the database, which led to bundles that carry the whole chain.
 - Being honest about limits: the log is tamper-evident, not tamper-proof. Removing the newest events is only detectable against a head hash saved elsewhere, so the head hash is written into each PayPal order.
 - Sandbox constraints: the sandbox business account was not enabled for card payments, so capturing an order needs a sandbox buyer to approve it in a browser.
 
 ### Accomplishments (measured)
-- 138 automated tests.
+- 144 automated tests.
 - Red-team suite: 27 of 27 attack scenarios blocked (prompt injection, inflated totals, lookalike merchants, replay, order splitting, forged mandates, and more). Two in-scope cases are intentionally not blocked and are reported. The scenarios were written by the same author as the guard, so this is a regression suite, not independent testing.
 - Tamper sweep: every single-field edit, deletion and swap on a real bundle (209 edits) is caught by the offline verifier, plus named cases for a forged key, wrong key and truncated tail.
 - 5,000 seeded random cases: the guard's decision and reason codes matched an independent oracle every time.
@@ -46,8 +49,8 @@ This project was built with AI assistance (Claude Code). Sandbox only; no real m
 3. 0:35 Click "Buy an in-scope pair": ALLOW, PayPal sandbox order id appears, log grows.
 4. 1:05 Click "Injected listing": agent proposes five gift cards; DENY with four reason codes; "PayPal was never called".
 5. 1:30 Dispute: build the evidence bundle; submit it to a real sandbox dispute (record only if the dispute is real; otherwise show the bundle and offline verification and say plainly it is not yet submitted).
-6. 2:00 "Edit one event in the database", then Verify chain: it fails at the exact event. Say the head-hash limit in one sentence.
-7. 2:30 Numbers: 138 tests, red-team 27/27, repo link.
+6. 2:00 "Edit one event in the database", then Verify chain: it fails at the exact event. Press "Anchor head hash" before the tamper step to show the independent timestamp, then say the limit in one sentence: events after the latest anchor are not pinned.
+7. 2:30 Numbers: 144 tests, red-team 27/27, repo link.
 Check the screen for secrets, emails and tokens before uploading. 1080p, public, "Not for Kids", upload at least a day early.
 
 ## Checklist
