@@ -24,6 +24,10 @@ h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
 header p { margin:0; color:var(--muted); flex:1 1 300px; }
 .badge { font:600 12px var(--mono); padding:3px 8px; border-radius:99px; border:1px solid var(--line); background:var(--card); }
 .badge.sandbox { color:var(--ok); border-color:var(--ok); } .badge.simulated { color:var(--warn); border-color:var(--warn); }
+.how { max-width:1180px; margin:4px auto 0; padding:0 16px; display:grid; gap:8px; grid-template-columns:repeat(4,1fr); }
+@media (max-width: 860px) { .how { grid-template-columns:1fr 1fr; } }
+.how div { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:13.5px; color:var(--muted); }
+.how b { display:block; color:var(--ink); font-size:14px; }
 main { max-width:1180px; margin:0 auto; padding:8px 16px 48px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
 @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0; }
@@ -64,6 +68,12 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
   <p>When an AI agent buys something and it is disputed, this is the record of what it was allowed to do and what it did.</p>
   <span id="mode" class="badge">…</span>
 </header>
+<div class="how" aria-label="How it works">
+  <div><b>1 · Mandate</b>The person signs a scoped, expiring permission.</div>
+  <div><b>2 · Guard</b>Plain code checks every purchase before PayPal is called.</div>
+  <div><b>3 · Recorder</b>Every step goes into a hash-chained, timestamp-anchored log.</div>
+  <div><b>4 · Evidence</b>A dispute gets a bundle anyone can verify offline.</div>
+</div>
 <main>
   <section class="card" aria-labelledby="h-mandate">
     <h2 id="h-mandate">1 · Mandate (signed permission)</h2>
