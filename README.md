@@ -18,6 +18,8 @@ Agent Flight Recorder closes that gap:
 4. **Evidence.** If the buyer disputes the purchase, the mandate and the log
    are assembled into evidence and submitted through PayPal's Disputes API.
 
+![Dashboard: signed mandate, guard verdicts, hash-chained log with a tamper detected at event #4](docs/dashboard.png)
+
 Built for the PayPal AI Hackathon. Sandbox only; no real money moves.
 
 ## How it works
