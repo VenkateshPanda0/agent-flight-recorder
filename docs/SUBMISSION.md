@@ -24,7 +24,7 @@ The log head hash can be stamped by an independent RFC 3161 timestamp authority,
 - Sandbox constraints: the sandbox business account was not enabled for card payments, so capturing an order needs a sandbox buyer to approve it in a browser.
 
 ### Accomplishments (measured)
-- 144 automated tests.
+- 145 automated tests.
 - Red-team suite: 27 of 27 attack scenarios blocked (prompt injection, inflated totals, lookalike merchants, replay, order splitting, forged mandates, and more). Two in-scope cases are intentionally not blocked and are reported. The scenarios were written by the same author as the guard, so this is a regression suite, not independent testing.
 - Tamper sweep: every single-field edit, deletion and swap on a real bundle (209 edits) is caught by the offline verifier, plus named cases for a forged key, wrong key and truncated tail.
 - 5,000 seeded random cases: the guard's decision and reason codes matched an independent oracle every time.
@@ -50,7 +50,7 @@ This project was built with AI assistance (Claude Code). Sandbox only; no real m
 4. 1:05 Click "Injected listing": agent proposes five gift cards; DENY with four reason codes; "PayPal was never called".
 5. 1:30 Dispute: build the evidence bundle; submit it to a real sandbox dispute (record only if the dispute is real; otherwise show the bundle and offline verification and say plainly it is not yet submitted).
 6. 2:00 "Edit one event in the database", then Verify chain: it fails at the exact event. Press "Anchor head hash" before the tamper step to show the independent timestamp, then say the limit in one sentence: events after the latest anchor are not pinned.
-7. 2:30 Numbers: 144 tests, red-team 27/27, repo link.
+7. 2:30 Numbers: 145 tests, red-team 27/27, repo link.
 Check the screen for secrets, emails and tokens before uploading. 1080p, public, "Not for Kids", upload at least a day early.
 
 ## Checklist
