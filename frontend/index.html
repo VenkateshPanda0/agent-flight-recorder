@@ -8,13 +8,13 @@
 :root {
   --bg:#f6f7f9; --card:#fff; --ink:#14181f; --muted:#5b6472; --line:#e3e6eb;
   --accent:#0b5fff; --ok:#0a7a3f; --okbg:#e3f5eb; --warn:#8a5a00; --warnbg:#fff1d6;
-  --bad:#b3261e; --badbg:#fde7e5; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bad:#b3261e; --badbg:#fde7e5; --on-accent:#fff; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg:#0e1116; --card:#171b22; --ink:#e8ebf0; --muted:#9aa4b2; --line:#2a303a;
     --accent:#6ea1ff; --ok:#5fd18f; --okbg:#12301f; --warn:#f0b650; --warnbg:#3a2c10;
-    --bad:#ff8b84; --badbg:#3d1714;
+    --bad:#ff8b84; --badbg:#3d1714; --on-accent:#0b1220;
   }
 }
 * { box-sizing: border-box; }
@@ -36,12 +36,13 @@ h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(-
 dl { display:grid; grid-template-columns: max-content 1fr; gap:4px 14px; margin:0; }
 dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
 .mono { font-family:var(--mono); font-size:12.5px; }
+#head { overflow-wrap:anywhere; word-break:break-all; }
 .meter { height:10px; background:var(--line); border-radius:99px; overflow:hidden; margin:6px 0 2px; }
 .meter > div { height:100%; background:var(--accent); width:0; transition:width .3s; }
 .row { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
 button { font:inherit; font-weight:600; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
 button:hover { border-color:var(--accent); } button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
 button.danger { color:var(--bad); } button:disabled { opacity:.5; cursor:default; }
 .verdict { display:inline-block; font:700 13px var(--mono); padding:3px 9px; border-radius:6px; }
 .ALLOW,.ORDER_CREATED { background:var(--okbg); color:var(--ok); }
@@ -68,12 +69,12 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
   <p>When an AI agent buys something and it is disputed, this is the record of what it was allowed to do and what it did.</p>
   <span id="mode" class="badge">…</span>
 </header>
-<div class="how" aria-label="How it works">
+<section class="how" aria-label="How it works">
   <div><b>1 · Mandate</b>The person signs a scoped, expiring permission.</div>
   <div><b>2 · Guard</b>Plain code checks every purchase before PayPal is called.</div>
   <div><b>3 · Recorder</b>Every step goes into a hash-chained, timestamp-anchored log.</div>
   <div><b>4 · Evidence</b>A dispute gets a bundle anyone can verify offline.</div>
-</div>
+</section>
 <main>
   <section class="card" aria-labelledby="h-mandate">
     <h2 id="h-mandate">1 · Mandate (signed permission)</h2>
@@ -92,7 +93,7 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
 
   <section class="card wide" aria-labelledby="h-log">
     <h2 id="h-log">3 · Flight recorder (hash-chained log)</h2>
-    <div class="tablewrap"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Event</th><th>Order</th><th>Hash</th></tr></thead><tbody id="events"></tbody></table></div>
+    <div class="tablewrap" tabindex="0" role="region" aria-label="Event log, scrollable"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Event</th><th>Order</th><th>Hash</th></tr></thead><tbody id="events"></tbody></table></div>
     <div class="note">Head hash: <span class="mono" id="head"></span></div>
     <div class="row">
       <button class="primary" id="verify">Verify chain</button>

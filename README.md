@@ -89,6 +89,13 @@ python scripts/verify_bundle.py evidence-<mandate>.json --key <public key> --hea
 Without `--head`, removal of the newest events cannot be detected; without
 `--key`, the signer is not checked. The script says so when either is missing.
 
+## Accessibility
+
+`node scripts/a11y_check.js <url>` runs axe-core (WCAG 2.0/2.1 A and AA plus
+best-practice rules) on the dashboard in light, dark and phone width after
+exercising it. Last run: 0 violations in all three, no horizontal overflow.
+Automated checks catch only part of accessibility; this is not a full audit.
+
 ## Red-team results
 
 `python scripts/redteam_report.py` runs adversarial scenarios through the real
