@@ -141,6 +141,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                     status, reason = webhooks.handle(dict(self.headers), data)
                     return self._json(status, {"result": reason})
                 if path == "/api/verify-bundle":
+                    if limiter is not None and not limiter.allow(self._sid):
+                        return self._json(429, {"error": "too many requests; try again later"})
                     return self._json(200, app.verify_bundle(data.get("bundle", {}),
                                                              data.get("expected_head_hash")))
                 if not demo_actions:

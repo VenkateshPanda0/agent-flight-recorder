@@ -82,3 +82,15 @@ def test_unanchored_bundle_says_everything_is_unpinned(signed, keypair):
     orch = _world(signed, keypair)
     check = verify_bundle(build_bundle(orch.ledger, signed))
     assert check.anchors == [] and check.events_after_last_anchor == len(orch.ledger.events())
+
+
+def test_only_newest_anchors_are_checked_so_uploads_cannot_spawn_many_processes(signed, keypair, monkeypatch):
+    orch = _world(signed, keypair)
+    fake_ok = lambda h, t: AnchorCheck(True, "T", "ok")
+    for _ in range(8):
+        anchor_ledger(orch.ledger, post=lambda u, b: b"tok", verify=fake_ok)
+    calls = []
+    monkeypatch.setattr(A, "verify_token", lambda h, t: calls.append(h) or AnchorCheck(True, "T", "ok"))
+    check = verify_bundle(build_bundle(orch.ledger, signed), verify_anchors=True)
+    assert check.ok and len(calls) == 3
+    assert [a["verified"] for a in check.anchors].count(None) == 5

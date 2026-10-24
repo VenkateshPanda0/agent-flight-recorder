@@ -24,6 +24,7 @@ from .ledger import GENESIS_HASH, Ledger, compute_event_hash
 from .mandate import SignedMandate, verify_mandate
 
 BUNDLE_VERSION = 1
+MAX_ANCHORS_VERIFIED = 3
 
 
 def _money(minor: int, currency: str) -> str:
@@ -218,15 +219,17 @@ def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool)
     from .anchor import ANCHOR_RECORDED, verify_token
 
     last_seq = events[-1]["seq"] if events else 0
-    for ev in events:
-        if ev["type"] != ANCHOR_RECORDED:
-            continue
+    anchor_events = [ev for ev in events if ev["type"] == ANCHOR_RECORDED]
+    # Each token check launches openssl, so bound the work an uploaded bundle can cause.
+    # The newest anchors matter most: each one pins every event before it.
+    checked_seqs = {ev["seq"] for ev in anchor_events[-MAX_ANCHORS_VERIFIED:]}
+    for ev in anchor_events:
         p = ev["payload"]
         entry = {"seq": ev["seq"], "gen_time": p.get("gen_time"), "tsa": p.get("tsa"),
                  "verified": None}
         if p["anchored_hash"] != ev["prev_hash"]:
             check.fail("anchor record does not match its position in the chain", ev["seq"])
-        elif verify_anchors:
+        elif verify_anchors and ev["seq"] in checked_seqs:
             res = verify_token(p["anchored_hash"], base64.b64decode(p["token_b64"]))
             entry["verified"] = res.ok
             entry["gen_time"] = res.gen_time or entry["gen_time"]

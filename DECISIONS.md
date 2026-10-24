@@ -42,3 +42,6 @@ Non-obvious choices, so they can be explained and challenged.
     `openssl ts -query`); verification shells out to `openssl` and reports "not
     verified" if it is missing. A token is verified before it is logged. Anchoring is
     off in tests and in simulated mode so nothing touches the network by accident.
+15. **Bounded verification work.** Uploaded bundles can contain many timestamp tokens and each check
+    launches `openssl`, so only the newest 3 are verified (each pins everything before it) and
+    `/api/verify-bundle` is rate limited. Unchecked anchors are reported as "not checked", not "ok".
