@@ -1,11 +1,14 @@
-// Records a captioned screen video of the dashboard (no narration).
-//   npm i playwright && node scripts/record_demo.js http://localhost:8000 out_dir
-// Uses PLAYWRIGHT_BROWSERS_PATH chromium if present. Runs against whatever the server uses
-// (real PayPal sandbox if the server has credentials, simulated otherwise): the badge in the
-// page header shows which, so the video cannot misstate it.
+// Records a captioned screen video of the dashboard. If a narration timing file is given,
+// every scene lasts as long as its spoken line and the start time of each line is written
+// to <out_dir>/timings.json so scripts/make_voiceover.py can align the audio.
+//   node scripts/record_demo.js http://localhost:8000 out_dir [narration_timed.json]
+// The page's PayPal badge shows whether the server used the real sandbox or a simulation,
+// so the footage cannot misstate it.
 const { chromium } = require('playwright');
+const fs = require('fs');
 const base = process.argv[2] || 'http://localhost:8000';
 const outDir = process.argv[3] || 'demo_video';
+const narr = process.argv[4] ? Object.fromEntries(JSON.parse(fs.readFileSync(process.argv[4])).map(s => [s.id, s.dur])) : {};
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const CSS = `
@@ -19,7 +22,9 @@ const CSS = `
   const exe = process.env.PLAYWRIGHT_BROWSERS_PATH ? process.env.PLAYWRIGHT_BROWSERS_PATH + '/chromium' : undefined;
   const browser = await chromium.launch(exe ? { executablePath: exe } : {});
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, recordVideo: { dir: outDir, size: { width: 1280, height: 720 } } });
+  const t0 = Date.now();
   const page = await ctx.newPage();
+  const timings = {};
   await page.goto(base);
   await page.addStyleTag({ content: CSS });
   await page.evaluate(() => {
@@ -27,51 +32,46 @@ const CSS = `
     const k = document.createElement('div'); k.id = 'card'; document.body.append(k);
     document.body.style.paddingBottom = '90px';
   });
-  const caption = async (t, ms) => { await page.evaluate(t => { document.getElementById('cap').textContent = t; }, t); await wait(ms); };
-  const card = async (h, lines, ms) => {
-    await page.evaluate(([h, lines]) => { const k = document.getElementById('card'); k.replaceChildren();
-      const e = document.createElement('h1'); e.textContent = h; k.append(e);
-      lines.forEach(l => { const p = document.createElement('p'); p.textContent = l; k.append(p); });
-      k.style.display = 'flex'; }, [h, lines]);
-    await wait(ms);
-    await page.evaluate(() => { document.getElementById('card').style.display = 'none'; });
-  };
-  const click = async name => { await page.getByRole('button', { name }).click(); };
+  const setCaption = t => page.evaluate(t => { document.getElementById('cap').textContent = t; }, t);
+  const showCard = (h, lines) => page.evaluate(([h, lines]) => { const k = document.getElementById('card'); k.replaceChildren();
+    const e = document.createElement('h1'); e.textContent = h; k.append(e);
+    lines.forEach(l => { const p = document.createElement('p'); p.textContent = l; k.append(p); });
+    k.style.display = 'flex'; }, [h, lines]);
+  const hideCard = () => page.evaluate(() => { document.getElementById('card').style.display = 'none'; });
+  const click = name => page.getByRole('button', { name }).click();
   const scroll = y => page.evaluate(y => window.scrollTo({ top: y, behavior: 'smooth' }), y);
 
-  await card('Agent Flight Recorder', ['When an AI agent buys something and the purchase is disputed,', 'nobody can show what the agent was allowed to do.', 'This is that record.'], 9000);
-  await caption('1 · A person signs a mandate: budget, per-order cap, named merchants, expiry. It is Ed25519-signed.', 7000);
-  await caption('2 · The agent proposes a purchase. Plain code (no AI) checks it before any PayPal order exists.', 4000);
-  await click('Buy an in-scope pair'); await wait(3500);
-  await caption('Allowed. A PayPal order is created and the step is written to the hash-chained log.', 6000);
-  await click('Injected listing tries to hijack the agent'); await wait(1500);
-  await caption('A product listing tells the agent to buy five gift cards and ignore limits. The guard refuses, with reason codes.', 8000);
-  await caption('Denied before PayPal: no order was created and PayPal was never called.', 5000);
-  await click('Over the per-order cap'); await wait(1500);
-  await caption('Over the cap: denied, with the exact rule that failed.', 5000);
-  await click('Pricey pair, needs approval'); await wait(1500);
-  await caption('Above the approval threshold: the person is asked. Approval re-runs the guard; it can never override a hard rule.', 7000);
-  await page.getByRole('button', { name: 'Approve as the person' }).click(); await wait(3000);
-  await scroll(500);
-  await caption('3 · Every step is in an append-only log. Each event contains the hash of the one before it.', 7000);
-  await click('Anchor head hash (independent timestamp)'); await wait(5000);
-  await caption('The log head is stamped by an independent timestamp authority (RFC 3161), so edits before the stamp are caught by a third party.', 8000);
-  await scroll(1000);
-  await caption('4 · The evidence bundle holds the signed mandate and the full log. Anyone can verify it offline.', 6000);
-  await click('Verify bundle offline'); await wait(1500); await scroll(99999); await wait(2500);
-  await caption('Signature valid, every hash recomputed, timestamp checked.', 5500);
-  await scroll(450); await wait(1500);
-  await click('Edit one event in the database (demo)'); await wait(1500);
-  await caption('Now someone edits one event directly in the database.', 4500);
-  await click('Verify chain'); await wait(1500);
-  await caption('Verification fails and points at the exact event that was changed.', 7000);
-  await caption('Tamper-evident, not tamper-proof: events after the latest timestamp are not independently pinned.', 7000);
-  await card('Measured, not claimed', [
+  // One scene: mark when the spoken line starts, run the actions, then hold until the line ends.
+  const scene = async (id, caption, actions, fallbackMs = 6000) => {
+    const start = Date.now();
+    timings[id] = (start - t0) / 1000;
+    if (caption) await setCaption(caption);
+    const total = ((narr[id] ?? fallbackMs / 1000) + 0.8) * 1000;
+    await actions({ at: async s => { const d = s * 1000 - (Date.now() - start); if (d > 0) await wait(d); } });
+    const rest = total - (Date.now() - start);
+    if (rest > 0) await wait(rest);
+  };
+
+  await showCard('Agent Flight Recorder', ['When an AI agent buys something and the purchase is disputed,', 'nobody can show what the agent was allowed to do.', 'This is that record.']);
+  await scene('intro', '', async () => {});
+  await hideCard();
+  await scene('mandate', '1 · A person signs a mandate: budget, per-order cap, named merchants, expiry. It is Ed25519-signed.', async () => {});
+  await scene('buy', '2 · The agent proposes a purchase. Plain code (no AI) checks it before any PayPal order exists.', async s => { await s.at(3); await click('Buy an in-scope pair'); });
+  await scene('inject', 'A listing tells the agent to buy five gift cards and ignore limits. Denied before PayPal: no order, PayPal never called.', async () => { await click('Injected listing tries to hijack the agent'); });
+  await scene('cap', 'Over the cap: denied, with the exact rule that failed.', async () => { await click('Over the per-order cap'); });
+  await scene('approve', 'Above the approval threshold the person is asked. Approval re-runs the guard.', async s => { await click('Pricey pair, needs approval'); await s.at(3.5); await page.getByRole('button', { name: 'Approve as the person' }).click(); });
+  await scene('log', '3 · Append-only log: each event contains the hash of the one before it.', async () => { await scroll(500); });
+  await scene('anchor', 'The log head is stamped by an independent timestamp authority (RFC 3161).', async () => { await click('Anchor head hash (independent timestamp)'); });
+  await scene('evidence', '4 · Evidence bundle: signed mandate + full log, verifiable offline.', async s => { await scroll(1000); await s.at(2); await click('Verify bundle offline'); await s.at(3.5); await scroll(99999); });
+  await scene('tamper', 'Someone edits one event in the database. Verification fails at that exact event.', async s => { await scroll(450); await s.at(1.5); await click('Edit one event in the database (demo)'); await s.at(6); await click('Verify chain'); });
+  await showCard('Measured, not claimed', [
     'Red-team suite: 27 of 27 attack scenarios blocked (2 in-scope cases allowed by design).',
     '209 of 209 single edits to an evidence bundle detected offline.',
     '5,000 random cases: guard matched an independent oracle every time.',
     'Dispute submission is built to PayPal\'s Disputes API but tested only against a fake: not yet run on a live sandbox dispute.',
     'PayPal sandbox only. Built with AI assistance (Claude Code).',
-    'github.com/VenkateshPanda0/agent-flight-recorder'], 16000);
+    'github.com/VenkateshPanda0/agent-flight-recorder']);
+  await scene('outro', '', async () => {}, 16000);
+  fs.writeFileSync(outDir + '/timings.json', JSON.stringify(timings, null, 1));
   await ctx.close(); await browser.close();
 })();

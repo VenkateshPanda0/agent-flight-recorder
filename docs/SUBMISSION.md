@@ -53,6 +53,9 @@ This project was built with AI assistance (Claude Code). Sandbox only; no real m
 7. 2:30 Numbers: 145 tests, red-team 27/27, repo link.
 Check the screen for secrets, emails and tokens before uploading. 1080p, public, "Not for Kids", upload at least a day early.
 
+## Voiceover
+`docs/narration.json` is the spoken script (about 1:53 of speech). The voice is Piper's `en_US-joe-medium`, licensed CC0, synthesized locally with `scripts/make_voiceover.py`; say "synthesized voice" in the Devpost description if asked. To re-record: start the server, run `node scripts/record_demo.js <url> <dir> narration_timed.json`, then `python scripts/make_voiceover.py docs/narration.json voice.onnx <dir> <dir>/video.webm out.mp4`.
+
 ## Checklist
 - [ ] Repo public, MIT licence present, README run steps tested on a clean checkout
 - [ ] Live demo URL works (Render), seeded demo works from a clean browser
