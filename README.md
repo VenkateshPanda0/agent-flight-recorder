@@ -12,8 +12,10 @@ Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
 ## Try it
 
+**Live demo: https://venkateshpanda0.github.io/agent-flight-recorder/** (opens in about 10 seconds; no install, no login).
+
 - **One click:** open the dashboard and press **"Play the 1-minute story"**. It runs the whole flow for you: an allowed purchase, a hijack attempt refused, a real AI model's proposal denied, an approval, a timestamp, offline verification, and a tampered event caught.
-- **Browser-only demo (no server):** `frontend/index.html` runs the *real Python backend inside the page* (via Pyodide) when no server is present, with a simulated PayPal. The same code, the same guard and the same verifier, served as plain static files, so it works on any static host (for example GitHub Pages: `index.html` at the repo root forwards to it). Timestamp anchoring needs network and `openssl`, so it is only in the server version and the command-line verifier.
+- **Browser-only demo (no server):** `frontend/index.html` runs the *real Python backend inside the page* (via Pyodide) when no server is present, with a simulated PayPal. The same code, the same guard and the same verifier, served as plain static files, so it works on any static host. This repo's GitHub Pages site is exactly that (`index.html` at the repo root forwards to it). Timestamp anchoring needs network and `openssl`, so it is only in the server version and the command-line verifier.
 - **Full server version:** see [Run it](#run-it).
 
 ## The idea in four moves
