@@ -29,6 +29,7 @@ The log head hash can be stamped by an independent RFC 3161 timestamp authority,
 - Tamper sweep: every single-field edit, deletion and swap on a real bundle (209 edits) is caught by the offline verifier, plus named cases for a forged key, wrong key and truncated tail.
 - 5,000 seeded random cases: the guard's decision and reason codes matched an independent oracle every time.
 - Real PayPal sandbox orders created end to end through the guard and ledger.
+- A real AI model in the loop: a small open model (Qwen2.5-1.5B-Instruct, local) reading catalogues with hidden injections proposed something outside the mandate in 15 of 24 runs; the guard denied all 15 and made 0 PayPal order calls. Small sample, my own injection wordings.
 - Dispute evidence submission is implemented against PayPal's documented Disputes API but has only been tested against a fake transport, not a live sandbox dispute. Say this plainly in the final text unless a real dispute is run first.
 
 ### What I learned
@@ -38,7 +39,7 @@ The interesting problem in agentic commerce is not getting an agent to pay; it i
 Per-tenant chains, a published head-hash anchor, and mandate templates for common purchases.
 
 ### Built with
-Python, cryptography (Ed25519), SQLite, PayPal REST APIs (Orders v2, Customer Disputes, Webhooks; sandbox), optionally the Anthropic API for the demo agent, Render.
+Python, cryptography (Ed25519), SQLite, PayPal REST APIs (Orders v2, Customer Disputes, Webhooks; sandbox), llama.cpp with Qwen2.5-1.5B-Instruct (Apache-2.0) as the live demo agent.
 
 ### AI assistance
 This project was built with AI assistance (Claude Code). Sandbox only; no real money moves.
@@ -65,3 +66,7 @@ Check the screen for secrets, emails and tokens before uploading. 1080p, public,
 - [ ] Video under 3:00, public, Not for Kids, works logged out
 - [ ] No secrets in history (scan before final push)
 - [ ] Submitted by 9 Nov; confirmation page saved
+
+## Devpost "main technology requirement" answer (paste this)
+PayPal: the project uses the PayPal developer platform's free sandbox. OAuth 2.0 to authenticate; Orders v2 (create order) to place the purchases an AI agent is allowed to make, after a deterministic guard approves them; the Customer Disputes API (provide-evidence, multipart) to submit the evidence bundle for a disputed purchase (implemented to the documented API and tested against a fake transport; not yet run on a live sandbox dispute); and Webhooks signature verification (verify-webhook-signature) for dispute and payment events (implemented and tested against a fake; not registered).
+AI: the shopping agent is an AI model. In the live demo a real open model, Qwen2.5-1.5B-Instruct (Apache-2.0), runs locally through llama.cpp, reads a product catalogue and proposes a purchase. The product's whole purpose is to govern what AI agents are allowed to buy: the model proposes, deterministic code (no AI) decides. In 24 live runs against catalogues with hidden prompt-injection text, the model proposed an out-of-mandate purchase 15 times, and the guard denied all 15 before any PayPal order existed. The project was also built with AI assistance (Claude Code).

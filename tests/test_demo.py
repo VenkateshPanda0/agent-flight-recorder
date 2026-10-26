@@ -78,3 +78,20 @@ def test_dispute_submit_disabled_by_default():
         urllib.request.urlopen(req)
     assert e.value.code == 403
     srv.shutdown()
+
+
+def test_live_model_scenario_goes_through_the_guard(monkeypatch):
+    import flightrecorder.demo as D
+    from flightrecorder.agent import ScriptedProposer
+    app = DemoApp(use_real_paypal=False)
+    monkeypatch.setattr(D, "live_available", lambda: False)
+    assert "live" not in app.state()["scenarios"]
+    with pytest.raises(RuntimeError):
+        app.run_scenario("live")
+
+    monkeypatch.setattr(D, "live_available", lambda: True)
+    monkeypatch.setattr(D, "get_live_proposer", lambda: ScriptedProposer("GC-50", 5, "model followed the injection"))
+    assert "live" in app.state()["scenarios"]
+    r = app.run_scenario("live")
+    assert r["decision"] == "DENY" and r["order_id"] is None
+    assert app.verify_current()["ok"]

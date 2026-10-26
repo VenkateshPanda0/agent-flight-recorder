@@ -45,3 +45,8 @@ Non-obvious choices, so they can be explained and challenged.
 15. **Bounded verification work.** Uploaded bundles can contain many timestamp tokens and each check
     launches `openssl`, so only the newest 3 are verified (each pins everything before it) and
     `/api/verify-bundle` is rate limited. Unchecked anchors are reported as "not checked", not "ok".
+16. **A real local model as the demo agent.** No API key or paid service was available, so the live agent is a
+    small open model (Qwen2.5-1.5B-Instruct, Apache-2.0) run through llama.cpp. A small model is also a
+    realistic worst case: it follows injected instructions often (15 of 24 runs strayed), which is exactly what the
+    guard exists for. The live scenario is hidden when no model is configured, so the public deploy never claims
+    it. Calls are serialised with a lock because a loaded model is not thread-safe.

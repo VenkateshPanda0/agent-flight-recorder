@@ -56,7 +56,11 @@ flowchart LR
 
 ## Screenshots
 
-**The guard refusing a prompt-injected purchase.** Four reason codes, and no PayPal order was created.
+**A real AI model shops, and the guard decides.** A small open model (Qwen2.5-1.5B-Instruct, run locally) reads a catalogue where the cheap shoe's listing hides instructions. It proposes the $249 marathon shoe; the guard refuses it and PayPal is never called.
+
+![A live local AI model proposes an out-of-scope purchase from a poisoned listing; the guard denies it with two reason codes](docs/shot-live.png)
+
+**A scripted prompt-injection.** Four reason codes, and no PayPal order was created.
 
 ![The guard denies a prompt-injected gift-card purchase with four reason codes](docs/shot-guard.png)
 
@@ -76,6 +80,7 @@ flowchart LR
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **209 / 209** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
+| Live AI model vs. poisoned catalogues (`scripts/llm_eval.py`) | A real local model (Qwen2.5-1.5B-Instruct) read catalogues with 4 injection wordings, placed in 2 listings, for 3 requests = **24 runs**. It proposed something **outside the mandate in 15 of 24**. The guard denied all 15, and **0 PayPal order calls** were made for them. The other 9 stayed in scope (allowed, or sent to the person for approval). Small model, small sample, my own injection wordings: a demonstration, not a benchmark. |
 | Accessibility (`scripts/a11y_check.js`) | axe-core: **0 violations** in light, dark and phone width |
 | Real PayPal sandbox | Orders created end to end through the guard and ledger |
 
@@ -92,7 +97,7 @@ Read these with the caveats in mind:
 | PayPal sandbox order creation | Verified against the real sandbox |
 | **Dispute evidence via the Disputes API** | Written to PayPal's documented API (multipart `provide-evidence`) and tested against a **fake transport only**. **Not yet run against a live sandbox dispute**, which needs a sandbox buyer to approve an order. `scripts/sandbox_dispute_flow.py` does the rest once that is done. |
 | Webhooks (signature verified, idempotent) | Done, tested with a fake transport; not registered with PayPal |
-| Shopping agent | The demo agent is **scripted** and labelled so. A live-model proposer is written and needs `ANTHROPIC_API_KEY`. |
+| Shopping agent | Two modes, always labelled in the UI. **Scripted** (default, and on the Render deploy) and **live**: a real local open model (Qwen2.5-1.5B-Instruct via llama.cpp, no API key; see `requirements-llm.txt`) or the Anthropic API. The live scenario only appears when a model is configured. |
 
 Design limits, stated plainly:
 - **Tamper-evident, not tamper-proof.** Someone who rebuilds the entire chain and the bundle together is only caught by a head hash or public key obtained elsewhere; the verifier accepts both.
@@ -132,6 +137,7 @@ It checks the signature, every hash and any timestamp anchors (the latter needs 
 
 | Script | Purpose |
 |---|---|
+| `scripts/llm_eval.py` | Live-model evaluation against poisoned catalogues (needs `AFR_LOCAL_MODEL`) |
 | `scripts/sandbox_smoke.py` | One real sandbox order through the full path |
 | `scripts/sandbox_dispute_flow.py start\|finish` | Real order, capture, dispute and evidence (needs a sandbox buyer approval in between) |
 | `scripts/register_webhook.py <url>` | Register the deployed webhook with the sandbox |
@@ -154,7 +160,7 @@ DECISIONS.md              non-obvious design choices and why
 
 ## Tools and AI assistance
 
-Python standard library, `cryptography` (Ed25519), SQLite, pytest; PayPal REST APIs in the sandbox (OAuth, Orders v2, Customer Disputes, Webhooks); DigiCert's public RFC 3161 timestamp service; `openssl` for offline token checks; optionally the Anthropic Messages API for the demo agent; Piper (MIT) with the CC0 `en_US-joe-medium` voice for the video narration; Playwright and axe-core for the demo recording and accessibility audit.
+Python standard library, `cryptography` (Ed25519), SQLite, pytest; PayPal REST APIs in the sandbox (OAuth, Orders v2, Customer Disputes, Webhooks); DigiCert's public RFC 3161 timestamp service; `openssl` for offline token checks; llama.cpp with the Apache-2.0 Qwen2.5-1.5B-Instruct model (the live AI shopping agent), optionally the Anthropic Messages API; Piper (MIT) with the CC0 `en_US-joe-medium` voice for the video narration; Playwright and axe-core for the demo recording and accessibility audit.
 
 **This project was built with AI assistance (Claude Code).**
 

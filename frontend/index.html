@@ -87,7 +87,6 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
   <section class="card" aria-labelledby="h-agent">
     <h2 id="h-agent">2 · Agent proposes, the guard decides</h2>
     <div class="row" id="scenarios"></div>
-    <label class="note" id="llmrow" hidden><input type="checkbox" id="usellm"> use a live model for the proposal (otherwise the proposal is scripted and labelled so)</label>
     <div id="result" aria-live="polite"><p class="note">Pick a scenario. Deterministic code checks the purchase before any PayPal order exists.</p></div>
   </section>
 
@@ -164,10 +163,9 @@ async function refresh() {
   $('mode').textContent = state.paypal_mode === 'sandbox' ? 'PayPal sandbox (real API)' : 'PayPal simulated';
   $('mode').className = 'badge ' + state.paypal_mode;
   renderMandate(state); renderEvents(state); renderSummary(state);
-  $('llmrow').hidden = !state.llm_available;
   if (!$('scenarios').children.length) {
     Object.entries(state.scenarios).forEach(([key, title]) => {
-      const b = el('button', key === 'buy' ? 'primary' : '', title); b.onclick = () => run(key); $('scenarios').append(b);
+      const b = el('button', key === 'buy' ? 'primary' : '', title); if (key === 'live') b.title = 'A real model proposes the purchase; the guard still decides'; b.onclick = () => run(key); $('scenarios').append(b);
     });
   }
 }
@@ -184,7 +182,7 @@ function showResult(r) {
   }
 }
 async function run(key) {
-  try { showResult(await api('/api/demo/run', {scenario:key, llm:$('usellm').checked})); badSeq = null; $('verifyout').replaceChildren(); await refresh(); }
+  try { showResult(await api('/api/demo/run', {scenario:key, llm:false})); badSeq = null; $('verifyout').replaceChildren(); await refresh(); }
   catch (e) { $('result').replaceChildren(el('p', 'err', e.message)); }
 }
 function status(node, ok, text) { node.replaceChildren(el('div', 'status ' + (ok ? 'ok' : 'bad'), text)); }

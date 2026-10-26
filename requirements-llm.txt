@@ -1,0 +1,5 @@
+# Optional: run a real local model as the demo shopping agent (no API key needed).
+#   pip install -r requirements-llm.txt --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+#   download qwen2.5-1.5b-instruct-q4_k_m.gguf (Apache-2.0) from
+#   https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF and set AFR_LOCAL_MODEL to its path
+llama-cpp-python>=0.3
