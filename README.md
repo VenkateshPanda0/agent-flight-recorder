@@ -9,14 +9,14 @@ Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
 ## Watch the demo
 
-![Highlights from the demo: an allowed purchase, a prompt-injected purchase refused, the evidence bundle verified offline, and a tampered event caught](docs/demo-highlights.gif)
+![Highlights from the demo: an allowed purchase, a live AI model's poisoned-listing purchase refused, the evidence bundle verified offline, and a tampered event caught](docs/demo-highlights.gif)
 
-*41-second silent highlights (plays inline). **[Download the full 2:02 narrated video](https://github.com/VenkateshPanda0/agent-flight-recorder/raw/main/docs/demo.mp4)** (MP4, with voiceover and captions; GitHub cannot play MP4 files in the browser, so it downloads).*
+*Silent highlights (plays inline). **[Download the full 2:13 narrated video](https://github.com/VenkateshPanda0/agent-flight-recorder/raw/main/docs/demo.mp4)** (MP4, with voiceover and captions; GitHub cannot play MP4 files in the browser, so it downloads).*
 
 The full video walks through the whole flow on the real PayPal sandbox:
 
 1. A person signs a **mandate**: budget, per-order cap, named merchants, expiry.
-2. An agent proposes purchases. A **product listing hides instructions** telling it to buy five gift cards and ignore its limits. The guard refuses, with reason codes, and PayPal is never called.
+2. A **real AI model** (a small open model running locally) shops from a catalogue where the cheap shoe's **listing hides instructions**. It takes the bait and proposes a $249 shoe. The guard refuses, with reason codes, and PayPal is never called.
 3. A pricey purchase **needs the person's approval**; approval re-runs the guard, so a human "yes" cannot override a hard rule.
 4. The log head is stamped by an **independent timestamp authority**, and the **evidence bundle** verifies offline.
 5. Someone **edits one event** in the database. Verification fails and points at the exact event.

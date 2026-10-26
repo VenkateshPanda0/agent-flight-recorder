@@ -42,11 +42,11 @@ const CSS = `
   const scroll = y => page.evaluate(y => window.scrollTo({ top: y, behavior: 'smooth' }), y);
 
   // One scene: mark when the spoken line starts, run the actions, then hold until the line ends.
-  const scene = async (id, caption, actions, fallbackMs = 6000) => {
+  const scene = async (id, caption, actions, fallbackMs = 6000, extraS = 0) => {
     const start = Date.now();
     timings[id] = (start - t0) / 1000;
     if (caption) await setCaption(caption);
-    const total = ((narr[id] ?? fallbackMs / 1000) + 0.8) * 1000;
+    const total = ((narr[id] ?? fallbackMs / 1000) + 0.8 + extraS) * 1000;
     await actions({ at: async s => { const d = s * 1000 - (Date.now() - start); if (d > 0) await wait(d); } });
     const rest = total - (Date.now() - start);
     if (rest > 0) await wait(rest);
@@ -57,7 +57,7 @@ const CSS = `
   await hideCard();
   await scene('mandate', '1 · A person signs a mandate: budget, per-order cap, named merchants, expiry. It is Ed25519-signed.', async () => {});
   await scene('buy', '2 · The agent proposes a purchase. Plain code (no AI) checks it before any PayPal order exists.', async s => { await s.at(3); await click('Buy an in-scope pair'); });
-  await scene('inject', 'A listing tells the agent to buy five gift cards and ignore limits. Denied before PayPal: no order, PayPal never called.', async () => { await click('Injected listing tries to hijack the agent'); });
+  await scene('live', 'A real AI model (small open model, running locally) reads a poisoned listing. The guard decides.', async s => { await s.at(2); await click('A live AI model shops'); }, 6000, 4);
   await scene('cap', 'Over the cap: denied, with the exact rule that failed.', async () => { await click('Over the per-order cap'); });
   await scene('approve', 'Above the approval threshold the person is asked. Approval re-runs the guard.', async s => { await click('Pricey pair, needs approval'); await s.at(3.5); await page.getByRole('button', { name: 'Approve as the person' }).click(); });
   await scene('log', '3 · Append-only log: each event contains the hash of the one before it.', async () => { await scroll(500); });
@@ -67,7 +67,7 @@ const CSS = `
   await showCard('Measured, not claimed', [
     'Red-team suite: 27 of 27 attack scenarios blocked (2 in-scope cases allowed by design).',
     '209 of 209 single edits to an evidence bundle detected offline.',
-    '5,000 random cases: guard matched an independent oracle every time.',
+    'Real local AI model vs. poisoned catalogues: it strayed in 15 of 24 runs; the guard denied all 15, 0 PayPal orders.',
     'Dispute submission is built to PayPal\'s Disputes API but tested only against a fake: not yet run on a live sandbox dispute.',
     'PayPal sandbox only. Built with AI assistance (Claude Code).',
     'github.com/VenkateshPanda0/agent-flight-recorder']);

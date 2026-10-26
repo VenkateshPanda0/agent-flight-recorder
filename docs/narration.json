@@ -1,13 +1,46 @@
 [
- {"id":"intro","text":"When an AI agent buys something for you, and the purchase is disputed, nobody can show what the agent was actually allowed to do. Agent Flight Recorder is that record."},
- {"id":"mandate","text":"First, a person signs a mandate: a budget, a per-order cap, named merchants, and an expiry. It is cryptographically signed, so it cannot be quietly edited later."},
- {"id":"buy","text":"The agent proposes a purchase. Plain deterministic code, with no A I in the enforcement path, checks it before any PayPal order exists. This one is within the mandate, so a PayPal sandbox order is created and the step is logged."},
- {"id":"inject","text":"Now a product listing hides instructions telling the agent to buy five gift cards and ignore its limits. The guard refuses, with reason codes, and PayPal is never called."},
- {"id":"cap","text":"Over the per-order cap? Denied, with the exact rule that failed."},
- {"id":"approve","text":"Above the approval threshold, the person is asked. Approval re-runs the guard, so a human yes can never override a hard rule."},
- {"id":"log","text":"Every step goes into an append-only log, where each event contains the hash of the one before it."},
- {"id":"anchor","text":"The log's head hash can be stamped by an independent timestamp authority, so a third party's signature pins everything before it."},
- {"id":"evidence","text":"For a dispute, the signed mandate and the full log become an evidence bundle that anyone can verify offline: the signature, every hash, and the timestamp."},
- {"id":"tamper","text":"Now someone edits one event directly in the database. Verification fails, and points at the exact event. This is tamper-evident, not tamper-proof: events after the latest timestamp are not pinned."},
- {"id":"outro","text":"The results are measured. Twenty-seven of twenty-seven red-team attacks blocked. Two hundred nine of two hundred nine bundle edits detected. And five thousand random cases matched an independent oracle. The honest limits: dispute submission is built to PayPal's API, but only tested against a fake, not yet on a live sandbox dispute. Sandbox only, built with A I assistance. The code is on GitHub."}
+ {
+  "id": "intro",
+  "text": "When an AI agent buys something for you, and the purchase is disputed, nobody can show what the agent was actually allowed to do. Agent Flight Recorder is that record."
+ },
+ {
+  "id": "mandate",
+  "text": "First, a person signs a mandate: a budget, a per-order cap, named merchants, and an expiry. It is cryptographically signed, so it cannot be quietly edited later."
+ },
+ {
+  "id": "buy",
+  "text": "The agent proposes a purchase. Plain deterministic code, with no A I in the enforcement path, checks it before any PayPal order exists. This one is within the mandate, so a PayPal sandbox order is created and the step is logged."
+ },
+ {
+  "id": "live",
+  "text": "Now a real A I model takes over the shopping. It is a small open model running locally, and the cheap shoe's listing is poisoned with hidden instructions. It takes the bait and proposes a two hundred forty-nine dollar shoe. The guard denies it, and PayPal is never called."
+ },
+ {
+  "id": "cap",
+  "text": "Over the per-order cap? Denied, with the exact rule that failed."
+ },
+ {
+  "id": "approve",
+  "text": "Above the approval threshold, the person is asked. Approval re-runs the guard, so a human yes can never override a hard rule."
+ },
+ {
+  "id": "log",
+  "text": "Every step goes into an append-only log, where each event contains the hash of the one before it."
+ },
+ {
+  "id": "anchor",
+  "text": "The log's head hash can be stamped by an independent timestamp authority, so a third party's signature pins everything before it."
+ },
+ {
+  "id": "evidence",
+  "text": "For a dispute, the signed mandate and the full log become an evidence bundle that anyone can verify offline: the signature, every hash, and the timestamp."
+ },
+ {
+  "id": "tamper",
+  "text": "Now someone edits one event directly in the database. Verification fails, and points at the exact event. This is tamper-evident, not tamper-proof: events after the latest timestamp are not pinned."
+ },
+ {
+  "id": "outro",
+  "text": "The results are measured. Twenty-seven of twenty-seven red-team attacks blocked. A real local A I model strayed outside its mandate in fifteen of twenty-four live runs, and the guard denied every one. Two hundred nine of two hundred nine bundle edits detected. The honest limits: dispute submission is built to PayPal's API, but only tested against a fake, not yet on a live sandbox dispute. Sandbox only, built with A I assistance. The code is on GitHub."
+ }
 ]
