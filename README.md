@@ -54,6 +54,28 @@ flowchart LR
 | **Anchoring** | The head hash can be stamped by a public RFC 3161 timestamp authority. Events up to a stamp cannot be edited or removed without contradicting a third party's signed time. |
 | **Evidence** | The signed mandate and full log are packaged into a bundle. `verify_bundle` recomputes every hash and the signature with no database and no network, and regenerates the summary from the events so it cannot be edited separately. |
 
+## How PayPal and AI are used
+
+**PayPal (developer sandbox only).** Everything below runs against `api-m.sandbox.paypal.com`; the client refuses any other base URL.
+
+| PayPal feature | What it does here | Status |
+|---|---|---|
+| OAuth 2.0 (`/v1/oauth2/token`) | Authenticates every call; the token is cached and never logged | Verified against the real sandbox |
+| Orders v2: create (`POST /v2/checkout/orders`) | Creates the order **only after** the guard returns ALLOW (or an approved NEEDS_APPROVAL). Line items, amounts and the mandate id are sent; the intent id is the `PayPal-Request-Id` so retries cannot double-order; the log head hash is written into the order description | Verified against the real sandbox |
+| Orders v2: capture, Payments refund | Capture and refund keep the ledger's budget in step with PayPal | Written and tested against a fake transport; capture needs a sandbox buyer to approve in a browser |
+| Customer Disputes API: `provide-evidence` (multipart) | Submits the evidence bundle (summary in the notes, full bundle as an attached JSON document) for a disputed purchase | Written to the documented API; **tested against a fake transport only, not a live sandbox dispute** |
+| Disputes: create dispute, `require-evidence`, `adjudicate` (sandbox helpers) | Used by `scripts/sandbox_dispute_flow.py` to run a whole dispute end to end | Written; not yet run live |
+| Webhooks: `verify-webhook-signature` | A webhook is only believed after PayPal verifies it; events are logged once per event id; dispute events trigger evidence handling | Written and tested against a fake transport; not registered with PayPal |
+
+**AI.** The product governs AI agents, and an AI model is in the loop:
+- **A real AI shopping agent.** In the live demo, a small open model (Qwen2.5-1.5B-Instruct, Apache-2.0) runs locally through llama.cpp, reads a product catalogue and proposes a purchase. The catalogue is poisoned with hidden instructions. The model proposes; **deterministic code, with no AI in the enforcement path, decides.** In 24 live runs the model strayed outside its mandate 15 times; the guard denied all 15 and no PayPal order was created for them (`scripts/llm_eval.py`). Optionally the agent can call the Anthropic Messages API instead (`ANTHROPIC_API_KEY`); that path has not been run.
+- **Built with AI assistance:** Claude Code (Anthropic's Claude) wrote most of the code, tests and docs, directed and reviewed by the author.
+- **AI voice:** the demo video's narration is synthesized with Piper and the CC0 `en_US-joe-medium` voice.
+
+**Other tools and technologies:** Python standard library, `cryptography` (Ed25519), SQLite, DigiCert's public RFC 3161 timestamp service, `openssl` (offline timestamp checks), llama.cpp, pytest, Playwright and axe-core (demo recording and accessibility checks).
+
+**Sponsor integrations:** none used. (A `render.yaml` is included for deployment; the Render deploy has not been verified.)
+
 ## Screenshots
 
 **A real AI model shops, and the guard decides.** A small open model (Qwen2.5-1.5B-Instruct, run locally) reads a catalogue where the cheap shoe's listing hides instructions. It proposes the $249 marathon shoe; the guard refuses it and PayPal is never called.
