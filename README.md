@@ -3,7 +3,7 @@
 **A flight recorder for purchases made by AI agents.**
 When an agent buys something for you and the purchase is disputed, nobody can show what the agent was actually allowed to do. This project keeps that record: a signed permission, a deterministic check before any money moves, a tamper-evident log, and an evidence bundle anyone can verify offline.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![145 tests](https://img.shields.io/badge/tests-146%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![146 tests](https://img.shields.io/badge/tests-146%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
