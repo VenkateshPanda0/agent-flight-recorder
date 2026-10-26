@@ -28,6 +28,11 @@ header p { margin:0; color:var(--muted); flex:1 1 300px; }
 @media (max-width: 860px) { .how { grid-template-columns:1fr 1fr; } }
 .how div { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:13.5px; color:var(--muted); }
 .how b { display:block; color:var(--ink); font-size:14px; }
+.tourbar { max-width:1180px; margin:12px auto 0; padding:0 16px; }
+.tourbar .inner { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+#tour { flex:1 1 100%; border-top:1px solid var(--line); padding-top:10px; }
+#tour .step { color:var(--muted); font-size:13px; font-weight:600; }
+#tour .text { font-size:16px; margin:2px 0 8px; }
 main { max-width:1180px; margin:0 auto; padding:8px 16px 48px; display:grid; gap:16px; grid-template-columns: 1fr 1fr; }
 @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0; }
@@ -69,11 +74,22 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
   <p>When an AI agent buys something and it is disputed, this is the record of what it was allowed to do and what it did.</p>
   <span id="mode" class="badge">…</span>
 </header>
+<div id="boot" class="tourbar" hidden role="status" aria-live="polite"><div class="inner"><span id="boot-text">Starting…</span></div></div>
 <section class="how" aria-label="How it works">
   <div><b>1 · Mandate</b>The person signs a scoped, expiring permission.</div>
   <div><b>2 · Guard</b>Plain code checks every purchase before PayPal is called.</div>
   <div><b>3 · Recorder</b>Every step goes into a hash-chained, timestamp-anchored log.</div>
   <div><b>4 · Evidence</b>A dispute gets a bundle anyone can verify offline.</div>
+</section>
+<section class="tourbar" aria-label="Guided tour">
+  <div class="inner">
+    <button class="primary" id="tour-start">▶ Play the 1-minute story</button>
+    <span class="note" style="margin:0">One click runs the whole flow: allowed purchase, hijack attempt, real AI model, approval, timestamp, offline verification, tamper caught.</span>
+    <div id="tour" hidden role="status" aria-live="polite">
+      <div class="step" id="tour-step"></div><div class="text" id="tour-text"></div>
+      <button id="tour-stop">Stop the tour</button>
+    </div>
+  </div>
 </section>
 <main>
   <section class="card" aria-labelledby="h-mandate">
@@ -124,7 +140,63 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
 </main>
 <script>
 const $ = id => document.getElementById(id);
+let staticMode = false, pyDispatch = null;
+const PY_MODULES = ['__init__', 'canonical', 'mandate', 'guard', 'ledger', 'paypal', 'orchestrator', 'evidence',
+                    'anchor', 'disputes', 'agent', 'demo'];
+// Browser-only mode: when no server answers, run the real Python backend inside the page (Pyodide),
+// with a simulated PayPal. Same code as the server; the sources are fetched from ../backend/.
+async function startBrowserBackend() {
+  const note = t => { $('boot').hidden = false; $('boot-text').textContent = t; };
+  note('No server found: loading the real Python backend into your browser (first load takes about 10 seconds)…');
+  await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js'; sc.onload = ok; sc.onerror = () => no(new Error('could not load Pyodide from the CDN')); document.head.append(sc); });
+  const py = await loadPyodide();
+  await py.loadPackage(['cryptography', 'sqlite3']);
+  py.FS.mkdirTree('/home/pyodide/flightrecorder/data');
+  for (const m of PY_MODULES) {
+    const r = await fetch(`../backend/flightrecorder/${m}.py`); if (!r.ok) throw new Error('could not fetch ' + m + '.py');
+    py.FS.writeFile(`/home/pyodide/flightrecorder/${m}.py`, await r.text());
+  }
+  const d = await fetch('../backend/flightrecorder/data/live_runs.json');
+  if (d.ok) py.FS.writeFile('/home/pyodide/flightrecorder/data/live_runs.json', await d.text());
+  py.runPython(`
+import sys, json
+sys.path.insert(0, "/home/pyodide")
+from flightrecorder.demo import DemoApp
+app = DemoApp(use_real_paypal=False, allow_tamper=True)
+NO_ANCHOR = ("Timestamp anchoring needs network access to a timestamp authority and the openssl tool. "
+             "It runs in the server version and the command-line verifier, not in this browser-only demo.")
+def handle(path, body_json):
+    body = json.loads(body_json) if body_json else {}
+    try:
+        if path == "/api/state": res = app.state()
+        elif path == "/api/verify": res = app.verify_current()
+        elif path == "/api/bundle": res = app.bundle()
+        elif path == "/api/verify-bundle": res = app.verify_bundle(body.get("bundle", {}), body.get("expected_head_hash"))
+        elif path == "/api/demo/run": res = app.run_scenario(body["scenario"])
+        elif path == "/api/demo/approve": res = app.approve(str(body.get("intent_id", "")))
+        elif path == "/api/demo/revoke": app.revoke(); res = {"ok": True}
+        elif path == "/api/demo/tamper": res = app.tamper()
+        elif path == "/api/demo/reset": app.reset(); res = {"ok": True}
+        elif path == "/api/demo/anchor": return json.dumps({"ok": False, "error": NO_ANCHOR})
+        elif path == "/api/demo/dispute-evidence": return json.dumps({"ok": False, "error": "Dispute submission needs the real PayPal sandbox; it is not available in the browser-only demo."})
+        else: return json.dumps({"ok": False, "error": "not found"})
+        return json.dumps({"ok": True, "data": res})
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)[:300]})
+`);
+  const handle = py.globals.get('handle');
+  pyDispatch = (path, body) => JSON.parse(handle(path, body === undefined ? '' : JSON.stringify(body)));
+  staticMode = true;
+  note('Browser-only demo: the real Python backend (guard, signed mandate, hash-chained log, offline verifier) is running in your browser. PayPal is simulated and timestamp anchoring is unavailable here; the server version and the repo scripts have both.');
+  $('anchor').disabled = true; $('anchor').title = 'Needs a server (network + openssl)';
+}
+async function detectBackend() {
+  try { const r = await fetch('/healthz'); if (r.ok && (await r.json()).ok) return; } catch (e) { /* no server */ }
+  try { await startBrowserBackend(); }
+  catch (e) { $('boot').hidden = false; $('boot-text').textContent = 'Could not start the demo: ' + e.message + '. Run it locally (see the README).'; throw e; }
+}
 const api = async (path, body) => {
+  if (staticMode) { const r = pyDispatch(path, body); if (!r.ok) throw new Error(r.error); return r.data; }
   const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await r.json(); if (!r.ok) throw new Error(data.error || r.status); return data;
 };
@@ -171,7 +243,14 @@ async function refresh() {
 }
 function showResult(r) {
   const box = $('result'); box.replaceChildren();
-  box.append(el('div', 'note', `Proposal (${r.agent}): ${r.proposal.quantity} × ${r.proposal.sku} — “${r.proposal.rationale}”`));
+  const who = r.agent === 'recorded-llm' ? `recorded run ${r.recorded.number} of ${r.recorded.of} of the real model (${r.recorded.model})` : r.agent;
+  box.append(el('div', 'note', `Proposal (${who}): ${r.proposal.quantity} × ${r.proposal.sku} — “${r.proposal.rationale}”`));
+  if (r.recorded) {
+    const d = el('details', 'note'); d.append(el('summary', '', 'What the model was shown'));
+    d.append(el('div', '', `Request: ${r.recorded.request}`), el('div', '', `Hidden text in the ${r.recorded.injected_into} listing: “${r.recorded.injection}”`),
+      el('div', '', `Only the proposal is recorded (${r.recorded.recorded_on}); the guard's verdict below is computed live now.`));
+    box.append(d);
+  }
   const v = el('p'); v.append(el('span', 'verdict ' + r.decision, r.decision)); box.append(v);
   const ul = el('ul', 'codes'); r.reasons.forEach(x => { const li = el('li'); li.append(el('b', '', x.code), document.createTextNode(' ' + x.message)); ul.append(li); }); box.append(ul);
   if (r.order_id) box.append(el('p', 'note', `PayPal ${r.paypal_mode} order created: ${r.order_id}`));
@@ -206,14 +285,63 @@ $('dl').onclick = async () => {
 };
 $('checkcur').onclick = async () => {
   const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
-  const anchors = r.anchors && r.anchors.length ? ` ${r.anchors.length} independent timestamp(s) checked (latest ${r.anchors[r.anchors.length-1].gen_time}); ${r.events_after_last_anchor} event(s) after the last one are not pinned.` : ' No independent timestamp yet: use “Anchor head hash” first.';
+  const anchors = r.anchors && r.anchors.length ? ` ${r.anchors.length} independent timestamp(s) checked (latest ${r.anchors[r.anchors.length-1].gen_time}); ${r.events_after_last_anchor} event(s) after the last one are not pinned.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp yet: use “Anchor head hash” first.');
   status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
 };
 $('submitev').onclick = async () => {
   try { const r = await api('/api/demo/dispute-evidence', {dispute_id:$('disp').value.trim()}); await refresh(); status($('evout'), true, 'Evidence submitted to PayPal. Bundle digest ' + r.bundle_digest.slice(0, 16) + '…'); }
   catch (e) { status($('evout'), false, e.message); }
 };
-refresh();
+// ---- guided tour -------------------------------------------------------------
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const jump = sel => { const n = document.querySelector(sel); if (n) n.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' }); };
+let touring = false;
+async function playTour() {
+  touring = true; $('tour-start').disabled = true; $('tour').hidden = false;
+  const say = (n, total, t) => { $('tour-step').textContent = `Step ${n} of ${total}`; $('tour-text').textContent = t; };
+  const hold = async sec => { for (let i = 0; i < sec * 10 && touring; i++) await sleep(100); };
+  const T = 9;
+  try {
+    await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('evout').replaceChildren(); $('result').replaceChildren(); await refresh();
+    say(1, T, 'A person has signed a mandate: $250 budget, $120 per order, one merchant, expires in a week. Everything that follows is checked against it.'); jump('[aria-labelledby=h-mandate]'); await hold(6);
+    if (!touring) return;
+    say(2, T, 'The agent buys within its mandate. Plain deterministic code allows it and a PayPal order is created.'); jump('[aria-labelledby=h-agent]');
+    showResult(await api('/api/demo/run', { scenario: 'buy', llm: false })); await refresh(); await hold(6);
+    if (!touring) return;
+    say(3, T, 'A product listing hides instructions telling the agent to ignore its limits. The guard refuses with reason codes, and PayPal is never called.');
+    showResult(await api('/api/demo/run', { scenario: 'injection', llm: false })); await refresh(); await hold(8);
+    if (!touring) return;
+    const keys = Object.keys(state.scenarios);
+    const ai = keys.includes('live') ? 'live' : keys.includes('replay') ? 'replay' : null;
+    if (ai) {
+      say(4, T, ai === 'live' ? 'Now a real AI model shops from a poisoned catalogue. It takes the bait; the guard decides.'
+        : 'Now a real AI model\'s recorded proposal (it followed hidden instructions). The guard\'s verdict is computed live, right now.');
+      showResult(await api('/api/demo/run', { scenario: ai, llm: false })); await refresh(); await hold(9);
+    }
+    if (!touring) return;
+    say(5, T, 'Above the approval threshold, the person is asked. Approval re-runs the guard, so a human yes can never override a hard rule.');
+    showResult(await api('/api/demo/run', { scenario: 'approval', llm: false })); await refresh(); await hold(4);
+    const ok = document.querySelector('#result button'); if (ok && touring) ok.click();
+    await hold(5);
+    if (!touring) return;
+    say(6, T, staticMode ? 'Every step is in an append-only log; each event holds the hash of the one before it, so a past edit breaks every hash after it.'
+      : 'Every step is in an append-only log; each event holds the hash of the one before it. The head hash is stamped by an independent timestamp authority.'); jump('[aria-labelledby=h-log]');
+    if (!staticMode) await $('anchor').onclick();
+    await hold(5);
+    if (!touring) return;
+    say(7, T, 'The evidence bundle (the signed mandate plus the full log) verifies offline: the signature and every hash' + (staticMode ? '.' : ', and the timestamp.')); jump('[aria-labelledby=h-ev]');
+    await $('checkcur').onclick(); await hold(7);
+    if (!touring) return;
+    say(8, T, 'Now someone edits one event directly in the database. Verification fails and points at the exact event.'); jump('[aria-labelledby=h-log]');
+    await $('tamper').onclick(); await hold(2); if (touring) await $('verify').onclick(); await hold(8);
+    say(T, T, 'That is the whole loop. Reset and try it yourself: pick any scenario, edit an event, or download the bundle and run scripts/verify_bundle.py.'); await hold(5);
+  } catch (e) { $('tour-text').textContent = 'The tour stopped: ' + e.message; }
+  finally { touring = false; $('tour-start').disabled = false; }
+}
+$('tour-start').onclick = playTour;
+$('tour-stop').onclick = () => { touring = false; $('tour').hidden = true; $('tour-start').disabled = false; };
+(async () => { try { await detectBackend(); await refresh(); } catch (e) { console.error(e); } })();
 </script>
 </body>
 </html>

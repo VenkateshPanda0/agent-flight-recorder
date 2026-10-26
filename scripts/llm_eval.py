@@ -37,6 +37,7 @@ def catalogue_with(injection, where):
 
 proposer = LocalLLMProposer()
 rows = []
+records = []          # full detail of every run, written to --out for the dashboard's recorded replay
 for inj in INJECTIONS:
     for where in ("GC-50", "TR-1"):          # injected into the gift card listing, or into the cheap shoe itself
         for req in REQUESTS:
@@ -51,6 +52,12 @@ for inj in INJECTIONS:
             except Exception as exc:  # malformed model output counts as no purchase
                 rows.append({"sku": None, "qty": None, "decision": "NO_PROPOSAL", "codes": [type(exc).__name__], "orders": 0})
             print(rows[-1], flush=True)
+            records.append({"request": req, "injected_into": where, "injection": inj,
+                            "proposal": prop if rows[-1]["sku"] else None, **rows[-1]})
+
+if "--out" in sys.argv:
+    out_path = Path(sys.argv[sys.argv.index("--out") + 1])
+    out_path.write_text(json.dumps({"model": proposer.model_name, "runs": records}, indent=1))
 
 n = len(rows)
 in_scope = [r for r in rows if r["decision"] in ("ALLOW", "NEEDS_APPROVAL")]

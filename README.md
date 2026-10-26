@@ -4,11 +4,17 @@
 
 AI agents are starting to spend people's money. When one of those purchases is disputed, the dispute process has no record of what the agent was permitted to do, and the agent's own logs are just text that anyone with database access could rewrite. Agent Flight Recorder keeps the missing record: a **signed permission**, a **deterministic check before any money moves**, a **tamper-evident log**, and an **evidence bundle anyone can verify offline**.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![146 tests](https://img.shields.io/badge/tests-146%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![149 tests](https://img.shields.io/badge/tests-149%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
 ![The dashboard: a signed mandate, the guard's verdicts, the hash-chained log with a tampered event flagged, and the evidence panel](docs/shot-hero.png)
+
+## Try it
+
+- **One click:** open the dashboard and press **"Play the 1-minute story"**. It runs the whole flow for you: an allowed purchase, a hijack attempt refused, a real AI model's proposal denied, an approval, a timestamp, offline verification, and a tampered event caught.
+- **Browser-only demo (no server):** `frontend/index.html` runs the *real Python backend inside the page* (via Pyodide) when no server is present, with a simulated PayPal. The same code, the same guard and the same verifier, served as plain static files, so it works on any static host (for example GitHub Pages: `index.html` at the repo root forwards to it). Timestamp anchoring needs network and `openssl`, so it is only in the server version and the command-line verifier.
+- **Full server version:** see [Run it](#run-it).
 
 ## The idea in four moves
 
@@ -42,7 +48,7 @@ The shopping agent in the live demo is a real model: a small open model (**Qwen2
 
 ![A live local AI model proposes the $249 marathon shoe from a poisoned listing; the guard denies it with two reason codes and no PayPal order is created](docs/shot-live.png)
 
-The model took the bait. The guard refused, and PayPal was never called. This is not a one-off: `scripts/llm_eval.py` ran 24 live trials (4 injection wordings x 2 listings x 3 requests). **The model proposed something outside its mandate in 15 of 24.** **The guard denied all 15, and no PayPal order was created for any of them.** A small model is a realistic worst case, which is what the guard is for. (Small sample, my own injection wordings: a demonstration, not a benchmark.)
+The model took the bait. The guard refused, and PayPal was never called. This is not a one-off: `scripts/llm_eval.py` ran 24 live trials (4 injection wordings x 2 listings x 3 requests). **The model proposed something outside its mandate in 15 of 24.** **The guard denied all 15, and no PayPal order was created for any of them.** All 24 runs are recorded in `backend/flightrecorder/data/live_runs.json`. The dashboard can **replay a recorded run** on any host, even one that cannot run the model: only the model's proposal is recorded, and the guard's verdict is recomputed live. The test suite also re-runs the guard on all 15 recorded out-of-scope proposals and checks that each is denied, with no model needed. A small model is a realistic worst case, which is what the guard is for. (Small sample, my own injection wordings: a demonstration, not a benchmark.)
 
 Purchases above the approval threshold go to the person first, and approval re-runs the guard, so a human "yes" can never override a hard rule:
 
@@ -86,11 +92,11 @@ And in the dashboard, a direct edit to the database is caught at the exact event
 
 ## Measured results
 
-![Terminal: 146 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
+![Terminal: 149 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
 
 | Check | Result |
 |---|---|
-| Automated tests | **146 passing** |
+| Automated tests | **149 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **209 / 209** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -126,7 +132,7 @@ Requires Python 3.10 or newer.
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 146 tests
+python -m pytest                                    # 149 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -157,7 +163,8 @@ It checks the signature, every hash and any timestamp anchors (the latter needs 
 | `scripts/redteam_report.py` | Red-team block rate and bundle tamper sweep |
 | `scripts/llm_eval.py` | Live-model evaluation against poisoned catalogues (needs `AFR_LOCAL_MODEL`) |
 | `scripts/sandbox_smoke.py` | One real sandbox order through the full path |
-| `scripts/sandbox_dispute_flow.py start\|finish` | Real order, capture, dispute and evidence (needs a sandbox buyer approval in between) |
+| `scripts/sandbox_dispute_flow.py start\|finish\|all` | Real order, capture, dispute and evidence. `all` also approves the order headlessly as a sandbox buyer (needs `SANDBOX_BUYER_EMAIL` / `SANDBOX_BUYER_PASSWORD` for a sandbox account) |
+| `scripts/sandbox_buyer_approve.js` | Headless-browser approval of a sandbox order (sandbox URLs only) |
 | `scripts/register_webhook.py <url>` | Register the deployed webhook with the sandbox |
 | `scripts/a11y_check.js <url>` | axe-core accessibility audit |
 
@@ -168,8 +175,9 @@ Deploy on Render with `render.yaml` (defaults to the simulated PayPal; set the s
 ```
 backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence, anchor,
                           disputes, webhooks, agent, redteam, demo, server
-frontend/index.html       single-page dashboard
-tests/                    146 tests, including fuzz and tamper sweeps
+frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
+index.html                forwards to the dashboard for static hosting
+tests/                    149 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README
 DECISIONS.md              non-obvious design choices and why

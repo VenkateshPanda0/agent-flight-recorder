@@ -4,6 +4,8 @@ must approve the order in a browser.
   python scripts/sandbox_dispute_flow.py start    # creates a guarded order, prints approve link
   (open the link, log in as a SANDBOX buyer, approve, come back)
   python scripts/sandbox_dispute_flow.py finish   # capture, dispute, evidence
+  python scripts/sandbox_dispute_flow.py all      # start + headless buyer approval + finish
+        (needs SANDBOX_BUYER_EMAIL and SANDBOX_BUYER_PASSWORD in the environment and `npm i playwright`)
 
 State is kept in .afr_flow.json (git-ignored). Secrets are never printed.
 """
@@ -87,5 +89,19 @@ def finish():
     print("Dispute status now:", client.get_dispute(dispute_id).get("status"))
 
 
+def everything():
+    import os
+    import subprocess
+    if not (os.environ.get("SANDBOX_BUYER_EMAIL") and os.environ.get("SANDBOX_BUYER_PASSWORD")):
+        raise SystemExit("Set SANDBOX_BUYER_EMAIL and SANDBOX_BUYER_PASSWORD (a SANDBOX buyer account).")
+    start()
+    link = json.loads(STATE.read_text())["order_id"]
+    approve_url = f"https://www.sandbox.paypal.com/checkoutnow?token={link}"
+    done = subprocess.run(["node", str(ROOT / "scripts" / "sandbox_buyer_approve.js"), approve_url])
+    if done.returncode != 0:
+        raise SystemExit("Buyer approval did not complete; approve the link above by hand, then run `finish`.")
+    finish()
+
+
 if __name__ == "__main__":
-    {"start": start, "finish": finish}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: print(__doc__))()
+    {"start": start, "finish": finish, "all": everything}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: print(__doc__))()

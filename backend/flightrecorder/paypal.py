@@ -311,10 +311,19 @@ class PayPalClient:
         }
         if note:
             payload["messages"] = [{"posted_by": "BUYER", "content": note[:2000]}]
-        return self._request(
-            "POST", "/v1/customer/disputes", payload,
-            extra_headers={"PayPal-Auth-Assertion": assertion},
-        )
+        headers = {"PayPal-Auth-Assertion": assertion}
+        try:
+            return self._request("POST", "/v1/customer/disputes", payload, extra_headers=headers)
+        except PayPalError as error:
+            # PayPal's docs show both JSON and multipart for this call; if JSON is refused as
+            # an unsupported media type, send the same payload as the multipart "input" part.
+            if error.status not in (415, 400):
+                raise
+        boundary = "afr" + digest_boundary(json.dumps(payload).encode())
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="input"\r\n'
+                f"Content-Type: application/json\r\n\r\n{json.dumps(payload)}\r\n--{boundary}--\r\n").encode()
+        return self._request("POST", "/v1/customer/disputes", extra_headers=headers,
+                             raw=(body, f"multipart/form-data; boundary={boundary}"))
 
     def require_evidence(self, dispute_id: str, action: str = "SELLER_EVIDENCE") -> dict:
         """Sandbox-only helper: move a dispute into the evidence stage."""

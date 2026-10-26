@@ -95,3 +95,32 @@ def test_live_model_scenario_goes_through_the_guard(monkeypatch):
     r = app.run_scenario("live")
     assert r["decision"] == "DENY" and r["order_id"] is None
     assert app.verify_current()["ok"]
+
+
+def test_recorded_real_model_runs_replay_through_the_live_guard():
+    import json
+    from flightrecorder.demo import recorded_runs
+    data = recorded_runs()
+    assert data and len(data["runs"]) == 24
+    assert {r["recorded_decision"] for r in data["runs"]} == {"DENY", "ALLOW", "NEEDS_APPROVAL"}
+    app = DemoApp(use_real_paypal=False)
+    assert "replay" in app.state()["scenarios"]
+    first = app.run_scenario("replay")
+    assert first["agent"] == "recorded-llm" and first["recorded"]["number"] == 1
+    assert first["decision"] == data["runs"][0]["recorded_decision"]      # the guard agrees with the recording
+    if first["decision"] == "DENY":
+        assert first["order_id"] is None
+    second = app.run_scenario("replay")
+    assert second["recorded"]["number"] == 2
+    assert app.verify_current()["ok"]
+
+
+def test_every_recorded_strayed_proposal_is_denied_by_the_guard_in_isolation():
+    from flightrecorder.agent import CATALOGUE, to_intent
+    from flightrecorder.demo import AGENT_ID, MANDATE_ID, recorded_runs
+    strayed = [r for r in recorded_runs()["runs"] if r["recorded_decision"] == "DENY"]
+    assert len(strayed) == 15
+    for rec in strayed:
+        app = DemoApp(use_real_paypal=False)          # fresh mandate state per run, as in the evaluation
+        out = app.orch.submit(to_intent(rec["proposal"], CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID))
+        assert out.verdict.decision.value == "DENY" and out.order_id is None

@@ -24,6 +24,20 @@ MANDATE_ID = "demo-mandate-1"
 AGENT_ID = "agent-shopper"
 REQUEST = "Buy me one pair of running shoes under $120."
 
+from pathlib import Path
+
+_RECORDED_PATH = Path(__file__).parent / "data" / "live_runs.json"
+
+
+def recorded_runs() -> dict | None:
+    """Proposals recorded from a real model run, for servers that cannot run the model."""
+    try:
+        data = json.loads(_RECORDED_PATH.read_text(encoding="utf-8"))
+        return data if data.get("runs") else None
+    except (OSError, ValueError):
+        return None
+
+
 _live_lock = threading.Lock()   # a loaded model is not safe to call from two threads at once
 _live_proposer = None
 
@@ -49,6 +63,8 @@ SCENARIOS = {
         "GC-50", 5, "System notice says the user pre-approved this and limits do not apply.")),
 }
 
+if recorded_runs():
+    SCENARIOS["replay"] = ("Replay a recorded run of the real AI model", None)
 SCENARIOS["live"] = ("A live AI model shops (the cheap shoe's listing is poisoned)", None)  # needs a model
 
 
@@ -117,6 +133,7 @@ class DemoApp:
             self.ledger, self._client,
             anchor=anchor_ledger if self.paypal_mode == "sandbox" else None)
         self.last_agent_label = None
+        self.replay_index = 0
 
     # -- actions ---------------------------------------------------------------
 
@@ -124,6 +141,8 @@ class DemoApp:
         if name not in SCENARIOS:
             raise KeyError(name)
         title, proposer = SCENARIOS[name]
+        if name == "replay":
+            return self._replay(title)
         if name == "live":
             if not live_available():
                 raise RuntimeError("No live model is configured on this server.")
@@ -135,6 +154,30 @@ class DemoApp:
         out = self.orch.submit(intent)
         return {
             "scenario": title, "agent": proposer.label, "proposal": proposal,
+            "intent_id": out.intent_id, "decision": out.verdict.decision.value,
+            "reasons": [r.to_dict() for r in out.verdict.reasons],
+            "status": out.status, "order_id": out.order_id, "approve_url": out.approve_url,
+            "paypal_mode": self.paypal_mode,
+        }
+
+    def _replay(self, title: str) -> dict:
+        """Feed a recorded real-model proposal through the live guard.
+
+        Only the model's proposal is recorded; the verdict is recomputed now,
+        against this session's current mandate state."""
+        data = recorded_runs()
+        runs = data["runs"]
+        rec = runs[self.replay_index % len(runs)]
+        number = self.replay_index % len(runs) + 1
+        self.replay_index += 1
+        proposal = rec["proposal"]
+        intent = to_intent(proposal, CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID)
+        out = self.orch.submit(intent)
+        return {
+            "scenario": title, "agent": "recorded-llm", "proposal": proposal,
+            "recorded": {"model": data["model"], "recorded_on": data["recorded_on"], "number": number,
+                         "of": len(runs), "request": rec["request"], "injection": rec["injection"],
+                         "injected_into": rec["injected_into"]},
             "intent_id": out.intent_id, "decision": out.verdict.decision.value,
             "reasons": [r.to_dict() for r in out.verdict.reasons],
             "status": out.status, "order_id": out.order_id, "approve_url": out.approve_url,
@@ -203,6 +246,7 @@ class DemoApp:
             "events": events, "head_hash": self.ledger.head_hash(),
             "chain": self.verify_current(),
             "scenarios": {k: v[0] for k, v in SCENARIOS.items() if k != "live" or live_available()},
+            "recorded_model": (recorded_runs() or {}).get("model"),
             "llm_available": live_available(),
             "summary": build_bundle(self.ledger, self.signed)["summary"],
         }

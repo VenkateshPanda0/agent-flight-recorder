@@ -98,3 +98,27 @@ def test_create_dispute_sends_buyer_assertion_and_amount():
     pad = lambda s: s + "=" * (-len(s) % 4)
     assert json.loads(base64.urlsafe_b64decode(pad(claims))) == {"iss": "my-client", "payer_id": "PAYER1"}
     assert sig == "" and seen["b"]["dispute_amount"]["value"] == "89.99"
+
+
+def test_create_dispute_falls_back_to_multipart_when_json_is_refused():
+    from test_orchestrator import FakePayPal
+    fake = FakePayPal()
+    seen = []
+    orig = fake.__call__
+
+    def spy(method, url, headers, body):
+        if url.endswith("/v1/customer/disputes"):
+            seen.append((dict(headers), body))
+            if len(seen) == 1:
+                return 415, {"name": "UNSUPPORTED_MEDIA_TYPE"}
+            return 201, {"links": [{"rel": "self", "href": "https://x/v1/customer/disputes/PP-D-7"}]}
+        return orig(method, url, headers, body)
+
+    client = PayPalClient(PayPalConfig("cid", "secret"), spy)
+    res = client.create_dispute(buyer_transaction_id="CAP1", reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+                                amount_minor=8999, currency="USD", buyer_payer_id="PAYER1")
+    assert len(seen) == 2 and res["links"][0]["rel"] == "self"
+    assert seen[0][0]["Content-Type"] == "application/json"
+    assert seen[1][0]["Content-Type"].startswith("multipart/form-data; boundary=")
+    assert b'name="input"' in seen[1][1] and b"PAYER1" not in seen[1][1]     # payer id only in the header
+    assert "PayPal-Auth-Assertion" in seen[1][0]
