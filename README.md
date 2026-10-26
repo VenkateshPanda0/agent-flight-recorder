@@ -171,7 +171,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
 frontend/index.html       single-page dashboard
 tests/                    146 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
-docs/                     screenshots and submission notes
+docs/                     screenshots used in this README
 DECISIONS.md              non-obvious design choices and why
 ```
 
