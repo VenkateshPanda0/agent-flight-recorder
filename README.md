@@ -3,7 +3,7 @@
 **A flight recorder for purchases made by AI agents.**
 When an agent buys something for you and the purchase is disputed, nobody can show what the agent was actually allowed to do. This project keeps that record: a signed permission, a deterministic check before any money moves, a tamper-evident log, and an evidence bundle anyone can verify offline.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![145 tests](https://img.shields.io/badge/tests-145%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![145 tests](https://img.shields.io/badge/tests-146%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
@@ -76,7 +76,7 @@ flowchart LR
 
 | Check | Result |
 |---|---|
-| Automated tests | **145 passing** |
+| Automated tests | **146 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **209 / 209** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -112,7 +112,7 @@ Requires Python 3.10 or newer.
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 145 tests
+python -m pytest                                    # 146 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -152,7 +152,7 @@ Deploy on Render with `render.yaml` (defaults to the simulated PayPal; set the s
 backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence,
                           anchor, disputes, webhooks, agent, redteam, demo, server
 frontend/index.html       single-page dashboard
-tests/                    145 tests, including fuzz and tamper sweeps
+tests/                    146 tests, including fuzz and tamper sweeps
 scripts/                  smoke tests, verifier, report, recording tools
 docs/                     screenshots, demo video, submission notes, narration script
 DECISIONS.md              non-obvious design choices and why
