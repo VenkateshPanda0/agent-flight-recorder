@@ -28,7 +28,9 @@ check = verify_bundle(bundle, trusted_public_key=args.key, expected_head_hash=ar
 print("signature:", "valid" if check.signature_ok else "INVALID")
 print("hash chain:", "intact" if check.chain_ok else "BROKEN")
 print("head hash:", check.head_hash)
-if check.anchors:
+if not check.chain_ok:
+    print("timestamp anchors: not checked, because the hash chain is broken")
+elif check.anchors:
     for a in check.anchors:
         state = {True: "verified", False: "FAILED", None: "not checked"}[a["verified"]]
         print(f"anchor at event #{a['seq']}: {state}, independent timestamp {a['gen_time']} ({a['tsa']})")
