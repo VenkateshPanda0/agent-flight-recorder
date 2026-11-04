@@ -4,7 +4,7 @@
 
 AI agents are starting to spend people's money. When one of those purchases is disputed, the dispute process has no record of what the agent was permitted to do, and the agent's own logs are just text that anyone with database access could rewrite. Agent Flight Recorder keeps the missing record: a **signed permission**, a **deterministic check before any money moves**, a **tamper-evident log**, and an **evidence bundle anyone can verify offline**.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![161 tests](https://img.shields.io/badge/tests-161%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![166 tests](https://img.shields.io/badge/tests-166%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
@@ -87,6 +87,7 @@ There is deliberately **no approve tool**: above the approval threshold the answ
 |---|---|---|
 | OAuth 2.0 (`/v1/oauth2/token`) | Authenticates every call; the token is cached and never logged | Verified against the real sandbox |
 | Orders v2: create (`POST /v2/checkout/orders`) | Creates the order **only after** the guard returns ALLOW (or an approved NEEDS_APPROVAL). The intent id is the `PayPal-Request-Id`, so retries cannot double-order; the log head hash is written into the order description | Verified against the real sandbox |
+| Orders v2: get order (`GET /v2/checkout/orders/{id}`) | **PayPal as an independent witness.** Every order is created with the log's head hash in its description; the verifier fetches the order back and compares it to the chain (see below) | Verified against the real sandbox |
 | Orders v2: capture; Payments refund | Keeps the ledger's budget in step with PayPal | Written, tested against a fake transport; capture needs a sandbox buyer to approve in a browser |
 | Customer Disputes: `provide-evidence` (multipart) | Submits the evidence bundle (summary in the notes, full bundle as an attached JSON document) | Written to the documented API; **tested against a fake transport only, not a live sandbox dispute** |
 | Disputes: create, `require-evidence`, `adjudicate` (sandbox helpers) | Used by `scripts/sandbox_dispute_flow.py` to run a dispute end to end | Written; not yet run live |
@@ -111,17 +112,23 @@ The same check runs from the command line with no server and no network. Below, 
 
 ![Terminal: verify_bundle.py accepts a real bundle, then rejects the same bundle after one edit and points at event 4](docs/shot-cli-verify.png)
 
+**PayPal as a witness.** A hash chain on its own has a known weakness: someone who edits history and then recomputes *every* hash produces a bundle that still verifies offline. So each PayPal order is created with the log's head hash in its description. `--paypal` fetches the order back from PayPal and compares. Below, with a real sandbox order: the honest bundle matches; a bundle whose history was rewritten and whose whole chain was rebuilt **passes the offline check, but PayPal's own copy exposes it**:
+
+![Terminal: an honest bundle matches PayPal's stored copy; a rebuilt chain passes offline but PayPal's witness says DIFFERS](docs/shot-cli-witness.png)
+
+In the dashboard (server version with the real sandbox) the same check is the **"Cross-check with PayPal's copy"** button. Limits: PayPal's sandbox deletes old unapproved orders, so an old order may be reported as "not checked", and the witness only covers history up to each order's creation.
+
 And in the dashboard, a direct edit to the database is caught at the exact event:
 
 ![Chain broken at event 4 after a direct database edit](docs/shot-tamper.png)
 
 ## Measured results
 
-![Terminal: 161 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
+![Terminal: 166 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
 
 | Check | Result |
 |---|---|
-| Automated tests | **161 passing** |
+| Automated tests | **166 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **209 / 209** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -145,7 +152,7 @@ How far to trust these:
 | Shopping agent | **Scripted** by default (and on any deploy without a model); **live** with a local open model (`requirements-llm.txt`). The UI labels which one produced each proposal. |
 
 Design limits, stated plainly:
-- **Tamper-evident, not tamper-proof.** Someone who rebuilds the entire chain and the bundle together is only caught by a head hash or public key obtained elsewhere; the verifier accepts both.
+- **Tamper-evident, not tamper-proof.** The offline check alone is fooled by someone who rebuilds the entire chain and the bundle together (the repo demonstrates this). That is caught by an independent copy of the head: PayPal's stored copy (`--paypal`), a timestamp anchor, or a saved head hash (`--head`) or public key (`--key`).
 - **Timestamp anchoring pins history up to the latest stamp.** Events after it are not pinned (the verifier reports how many). If a bundle is truncated to before its stamp, the stamp is simply absent, so keep the anchored hash somewhere else; the dispute notes carry it.
 - Capturing a payment needs a sandbox buyer to approve the order in a browser, so captured payments are not exercised automatically.
 
@@ -157,7 +164,7 @@ Requires Python 3.10 or newer.
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 161 tests
+python -m pytest                                    # 166 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -202,7 +209,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
                           disputes, webhooks, agent, mcp_server, redteam, demo, server
 frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
 index.html                forwards to the dashboard for static hosting
-tests/                    161 tests, including fuzz and tamper sweeps
+tests/                    166 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README
 DECISIONS.md              non-obvious design choices and why

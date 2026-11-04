@@ -213,6 +213,13 @@ class DemoApp:
         from .anchor import anchor_ledger
         return anchor_ledger(self.ledger)
 
+    def paypal_witness(self) -> list[dict]:
+        """Ask PayPal for its stored copy of the log head at each order and compare it to the chain."""
+        from .evidence import check_paypal_witness
+        if self.paypal_mode != "sandbox":
+            raise ValueError("This needs the real PayPal sandbox; this server is running with a simulated PayPal.")
+        return check_paypal_witness(self.bundle(), self._client.get_order)
+
     def tamper(self) -> dict:
         """Demo only: rewrite the amount in the first ORDER_CREATED event
         directly in the database, bypassing the append-only API."""

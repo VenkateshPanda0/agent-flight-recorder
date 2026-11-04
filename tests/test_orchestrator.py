@@ -196,3 +196,24 @@ def test_failed_paypal_call_can_be_retried_with_same_request_id(orch, fake):
     ids = {c[3].get("PayPal-Request-Id") for c in fake.order_posts()}
     assert len(ids) == 1 and None not in ids          # PayPal deduplicates on this
     assert orch.submit(make_intent()).status == "DUPLICATE"
+
+
+def test_request_id_is_stable_within_a_mandate_but_differs_between_mandates(fake, signed, keypair):
+    """Two sessions buying the same thing under different mandates must not share a PayPal-Request-Id,
+    or PayPal would return the first session's order (with its stale log head)."""
+    from datetime import timedelta
+    from flightrecorder.mandate import new_mandate, sign_mandate
+    ids = []
+    for mandate_signed, mandate_id in ((signed, "m-1"), (None, "m-other")):
+        if mandate_signed is None:
+            m = new_mandate(principal_id="user-1", agent_id="agent-shopper", purpose="Buy one pair of running shoes under $120",
+                            currency="USD", total_budget_minor=15_000, per_order_cap_minor=12_000, approval_threshold_minor=10_000,
+                            allowed_merchants=["shoes.example"], allowed_categories=["footwear"], max_orders=1,
+                            created_at=T0, expires_at=T0 + timedelta(hours=24), mandate_id=mandate_id)
+            mandate_signed = sign_mandate(m, keypair[0])
+        client = PayPalClient(PayPalConfig("id", "secret"), fake)
+        o = Orchestrator(Ledger(), client, trusted_public_key=keypair[1], clock=lambda: T0)
+        o.grant(mandate_signed)
+        o.submit(make_intent(mandate_id=mandate_id))
+        ids.append(fake.order_posts()[-1][3]["PayPal-Request-Id"])
+    assert ids[0] != ids[1]

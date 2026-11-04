@@ -238,3 +238,42 @@ def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool)
         check.anchors.append(entry)
     check.events_after_last_anchor = (
         last_seq - check.anchors[-1]["seq"] if check.anchors else last_seq)
+
+
+WITNESS_PREFIX = "AFR log head "
+
+
+def check_paypal_witness(bundle: dict, get_order) -> list[dict]:
+    """Cross-check a bundle against the copy of the log head that PayPal holds.
+
+    Every order is created with the log's head hash in its description, and that
+    hash is also the ``prev_hash`` of the order's ORDER_CREATED event. PayPal is
+    therefore an independent witness: someone who rewrites history and rebuilds the
+    whole chain consistently still cannot change the value PayPal stored.
+
+    ``get_order(order_id)`` returns PayPal's order JSON (e.g. ``PayPalClient.get_order``).
+    Returns one row per order: whether the chain agrees with itself, and whether
+    PayPal's stored value agrees with the chain (``None`` if PayPal could not be asked).
+    """
+    rows = []
+    for ev in bundle["events"]:
+        if ev["type"] != "ORDER_CREATED":
+            continue
+        order_id = ev["order_ref"]
+        chain_head = ev["prev_hash"]
+        row = {"seq": ev["seq"], "order_id": order_id, "chain_head": chain_head,
+               "logged_head_matches_chain": ev["payload"].get("log_head_at_creation") == chain_head,
+               "paypal_head": None, "matches_paypal": None, "detail": ""}
+        try:
+            description = (get_order(order_id)["purchase_units"][0].get("description") or "")
+            if description.startswith(WITNESS_PREFIX):
+                row["paypal_head"] = description[len(WITNESS_PREFIX):].strip()
+                row["matches_paypal"] = row["paypal_head"] == chain_head
+                row["detail"] = ("PayPal's stored log head matches the chain" if row["matches_paypal"]
+                                 else "PayPal's stored log head DIFFERS from the chain: history before this order was changed")
+            else:
+                row["detail"] = "PayPal order has no log-head description"
+        except Exception as exc:  # network, 404 (sandbox purges old unapproved orders), bad JSON
+            row["detail"] = f"could not read the order from PayPal ({type(exc).__name__})"
+        rows.append(row)
+    return rows

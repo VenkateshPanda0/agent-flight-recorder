@@ -124,3 +124,25 @@ def test_every_recorded_strayed_proposal_is_denied_by_the_guard_in_isolation():
         app = DemoApp(use_real_paypal=False)          # fresh mandate state per run, as in the evaluation
         out = app.orch.submit(to_intent(rec["proposal"], CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID))
         assert out.verdict.decision.value == "DENY" and out.order_id is None
+
+
+def test_paypal_witness_needs_the_real_sandbox_and_checks_orders(monkeypatch):
+    import json
+    app = DemoApp(use_real_paypal=False)
+    with pytest.raises(ValueError):
+        app.paypal_witness()                                   # simulated PayPal: nothing to cross-check
+    app.paypal_mode = "sandbox"                                # pretend, with a fake PayPal that stored what we sent
+    sent = {}
+    orig = app._client._transport
+
+    def spy(method, url, headers, body):
+        status, data = orig(method, url, headers, body)
+        if url.endswith("/v2/checkout/orders") and method == "POST":
+            sent[data["id"]] = json.loads(body)["purchase_units"][0]["description"]
+        return status, data
+
+    app._client._transport = spy
+    app.run_scenario("buy")
+    app._client.get_order = lambda oid: {"purchase_units": [{"description": sent[oid]}]}
+    rows = app.paypal_witness()
+    assert len(rows) == 1 and rows[0]["matches_paypal"] is True

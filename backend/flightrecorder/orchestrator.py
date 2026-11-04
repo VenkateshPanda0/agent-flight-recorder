@@ -256,6 +256,14 @@ class Orchestrator:
 
     # -- internals ---------------------------------------------------------
 
+    def _request_id(self, iid: str, intent: PurchaseIntent) -> str:
+        """The PayPal-Request-Id: stable for a replay of the same intent under the same signed
+        mandate (so retries cannot double-order), but different for every mandate. Using the
+        intent id alone would make PayPal hand back an old order, with an old log head in its
+        description, whenever two mandates (or two demo sessions) buy the same thing."""
+        signed = self._find_mandate(intent.mandate_id)
+        return digest({"intent": iid, "mandate": signed.mandate.digest() if signed else None})
+
     def _create_order(self, iid: str, intent: PurchaseIntent, verdict: Verdict) -> Outcome:
         head = self.ledger.head_hash()
         try:
@@ -265,7 +273,7 @@ class Orchestrator:
                 mandate_id=intent.mandate_id,
                 reference_id=iid[:64],
                 description=f"AFR log head {head}"[:127],
-                request_id=iid,
+                request_id=self._request_id(iid, intent),
             )
         except PayPalError as error:
             self.ledger.append(

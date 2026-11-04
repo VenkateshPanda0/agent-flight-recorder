@@ -130,6 +130,7 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
     <div class="row">
       <button id="dl">Download evidence bundle (JSON)</button>
       <button id="checkcur">Verify bundle offline</button>
+      <button id="witness" hidden>Cross-check with PayPal's copy</button>
     </div>
     <p class="note">The verifier recomputes every hash and the mandate signature with no database.</p>
     <label class="note" for="disp">PayPal sandbox dispute id (to submit the bundle through the Disputes API)</label>
@@ -235,6 +236,7 @@ async function refresh() {
   $('mode').textContent = state.paypal_mode === 'sandbox' ? 'PayPal sandbox (real API)' : 'PayPal simulated';
   $('mode').className = 'badge ' + state.paypal_mode;
   renderMandate(state); renderEvents(state); renderSummary(state);
+  $('witness').hidden = !(state.paypal_mode === 'sandbox' && !staticMode);
   if (!$('scenarios').children.length) {
     Object.entries(state.scenarios).forEach(([key, title]) => {
       const b = el('button', key === 'buy' ? 'primary' : '', title); if (key === 'live') b.title = 'A real model proposes the purchase; the guard still decides'; b.onclick = () => run(key); $('scenarios').append(b);
@@ -287,6 +289,21 @@ $('checkcur').onclick = async () => {
   const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
   const anchors = r.anchors && r.anchors.length ? ` ${r.anchors.length} independent timestamp(s) checked (latest ${r.anchors[r.anchors.length-1].gen_time}); ${r.events_after_last_anchor} event(s) after the last one are not pinned.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp yet: use “Anchor head hash” first.');
   status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
+};
+$('witness').onclick = async () => {
+  $('witness').disabled = true;
+  try {
+    const rows = await api('/api/demo/paypal-witness', {});
+    if (!rows.length) { status($('evout'), true, 'No PayPal orders in this log yet.'); }
+    else {
+      const bad = rows.filter(r => r.matches_paypal === false), unknown = rows.filter(r => r.matches_paypal === null);
+      status($('evout'), bad.length === 0 && unknown.length === 0,
+        bad.length ? `PayPal's stored log head DIFFERS from the chain for order ${bad[0].order_id}: history before it was changed.`
+        : unknown.length ? `Could not read ${unknown.length} order(s) from PayPal (the sandbox deletes old unapproved orders).`
+        : `PayPal holds the same log head as the chain for all ${rows.length} order(s): an independent witness agrees.`);
+    }
+  } catch (e) { status($('evout'), false, e.message); }
+  $('witness').disabled = false;
 };
 $('submitev').onclick = async () => {
   try { const r = await api('/api/demo/dispute-evidence', {dispute_id:$('disp').value.trim()}); await refresh(); status($('evout'), true, 'Evidence submitted to PayPal. Bundle digest ' + r.bundle_digest.slice(0, 16) + '…'); }

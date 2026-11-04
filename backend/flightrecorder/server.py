@@ -158,6 +158,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                 if path == "/api/demo/revoke":
                     app.revoke()
                     return self._json(200, {"ok": True})
+                if path == "/api/demo/paypal-witness":
+                    return self._json(200, app.paypal_witness())
                 if path == "/api/demo/anchor":
                     return self._json(200, app.anchor())
                 if path == "/api/demo/tamper":

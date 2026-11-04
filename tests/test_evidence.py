@@ -136,3 +136,52 @@ def test_cli_verifier_exit_codes(tmp_path, bundle, world):
     assert ok.returncode == 0 and "bundle verifies" in ok.stdout
     no = subprocess.run([sys.executable, str(script), str(bad)], capture_output=True, text=True)
     assert no.returncode == 1 and "FAILED" in no.stdout
+
+
+def _paypal_with_descriptions(orch):
+    """A fake PayPal that stored what the orchestrator really sent."""
+    sent = {}
+    for call in orch.paypal._transport.calls:
+        if call[1] == "/v2/checkout/orders" and call[0] == "POST":
+            sent[f"ORD{len(sent) + 1}"] = call[2]["purchase_units"][0]["description"]
+    return lambda order_id: {"purchase_units": [{"description": sent[order_id]}]}
+
+
+def test_paypal_witness_matches_an_honest_log(world):
+    from flightrecorder.evidence import check_paypal_witness
+    orch, signed, _ = world
+    rows = check_paypal_witness(build_bundle(orch.ledger, signed), _paypal_with_descriptions(orch))
+    assert len(rows) == 1 and rows[0]["matches_paypal"] is True and rows[0]["logged_head_matches_chain"]
+
+
+def test_fully_rebuilt_chain_passes_offline_but_paypal_witness_catches_it(world):
+    """The strongest attack on a hash chain: edit history, then recompute every hash.
+    The bundle verifies offline, but PayPal's stored copy of the head no longer matches."""
+    from flightrecorder.evidence import check_paypal_witness
+    from flightrecorder.ledger import compute_event_hash
+    orch, signed, pub = world
+    honest = json.loads(json.dumps(build_bundle(orch.ledger, signed)))
+    paypal = _paypal_with_descriptions(orch)
+
+    forged = copy.deepcopy(honest)
+    forged["events"][2]["payload"]["verdict"]["reasons"][0]["message"] = "rewritten after the fact"
+    prev = forged["events"][0]["hash"]
+    for ev in forged["events"][1:]:
+        ev["prev_hash"] = prev
+        ev["hash"] = compute_event_hash(ev["seq"], ev["ts"], ev["type"], ev["mandate_id"], ev["order_ref"],
+                                        ev["payload"], ev["prev_hash"])
+        prev = ev["hash"]
+    forged["head_hash"] = prev
+
+    assert verify_bundle(forged, trusted_public_key=pub).ok            # self-consistent: offline check alone is fooled
+    rows = check_paypal_witness(forged, paypal)
+    assert rows[0]["matches_paypal"] is False and "DIFFERS" in rows[0]["detail"]
+
+
+def test_paypal_witness_reports_unreachable_orders_as_not_checked(world):
+    from flightrecorder.evidence import check_paypal_witness
+    orch, signed, _ = world
+    def boom(_id):
+        raise RuntimeError("404")
+    rows = check_paypal_witness(build_bundle(orch.ledger, signed), boom)
+    assert rows[0]["matches_paypal"] is None and "could not read" in rows[0]["detail"]
