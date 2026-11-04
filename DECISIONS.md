@@ -50,3 +50,7 @@ Non-obvious choices, so they can be explained and challenged.
     realistic worst case: it follows injected instructions often (15 of 24 runs strayed), which is exactly what the
     guard exists for. The live scenario is hidden when no model is configured, so the public deploy never claims
     it. Calls are serialised with a lock because a loaded model is not thread-safe.
+17. **MCP server instead of PayPal's remote MCP server.** PayPal's hosted MCP endpoint sits behind a browser OAuth
+    login, so the sandbox client credentials do not work against it. Rather than depend on it, the project ships its
+    own MCP server that wraps the guard: agents get four tools, and the only way to move money is `propose_purchase`.
+    There is intentionally no approval tool, so an agent can never approve itself.
