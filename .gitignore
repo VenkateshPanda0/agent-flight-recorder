@@ -19,3 +19,4 @@ __pycache__/
 Thumbs.db
 .afr_flow.json
 .afr_flow.sqlite
+.afr_bundle_*.json

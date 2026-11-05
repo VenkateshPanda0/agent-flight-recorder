@@ -205,7 +205,7 @@ It checks the signature, every hash and any timestamp anchors (the latter needs 
 | `scripts/redteam_report.py` | Red-team block rate and bundle tamper sweep |
 | `scripts/llm_eval.py` | Live-model evaluation against poisoned catalogues (needs `AFR_LOCAL_MODEL`) |
 | `scripts/sandbox_smoke.py` | One real sandbox order through the full path |
-| `scripts/sandbox_dispute_flow.py start\|finish\|all` | Real order, capture, dispute and evidence. `all` also approves the order headlessly as a sandbox buyer (needs `SANDBOX_BUYER_EMAIL` / `SANDBOX_BUYER_PASSWORD` for a sandbox account) |
+| `scripts/sandbox_dispute_flow.py start\|capture\|evidence <id>\|finish\|all` | Real sandbox order, capture and dispute evidence. Realistic route: `start`, a sandbox buyer approves, `capture`, the buyer opens the dispute in the sandbox UI, then `evidence <dispute id>`. `finish`/`all` try to create the dispute through the API, which PayPal lists as a limited release |
 | `scripts/sandbox_buyer_approve.js` | Headless-browser approval of a sandbox order (sandbox URLs only) |
 | `scripts/register_webhook.py <url>` | Register the deployed webhook with the sandbox |
 | `scripts/a11y_check.js <url>` | axe-core accessibility audit |
@@ -221,7 +221,7 @@ frontend/index.html       single-page dashboard (also runs the Python backend in
 index.html                forwards to the dashboard for static hosting
 tests/                    179 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
-docs/                     screenshots used in this README
+docs/                     screenshots used in this README, and HARDENING_REVIEW.md (an external review of the payment lifecycle and request handling)
 DECISIONS.md              non-obvious design choices and why
 ```
 
