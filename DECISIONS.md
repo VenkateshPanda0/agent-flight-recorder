@@ -10,19 +10,19 @@ Non-obvious choices, so they can be explained and challenged.
    call; a denied purchase makes no network call at all (tested).
 4. **Replayed intents are idempotent.** The intent id is the hash of the
    intent. Re-submitting returns the earlier result and creates no second
-   order. The id is also sent as `PayPal-Request-Id`. If the earlier attempt
+   order. A hash of this id and the signed mandate is sent as `PayPal-Request-Id`. If the earlier attempt
    failed at PayPal (`ORDER_FAILED`), the same intent may be retried; the shared
-   request id means PayPal still creates at most one order.
+   request id deduplicates only within PayPal's retention window; ambiguous remote outcomes require reconciliation.
 5. **Approval re-runs the guard.** A human "yes" cannot override a revoked
    mandate, an expired one, or a blown cap.
-6. **Budget is reserved at order creation** and released by void, refund or a
+6. **Budget is reserved at order creation** and released by a local void of an uncaptured order, a completed refund or a
    failed PayPal call (a failed call logs `ORDER_FAILED` and creates no
    reservation).
 7. **Void is a ledger release, not a PayPal call.** An approved-but-unpaid
    CREATED order has no void endpoint; it lapses on PayPal's side.
 8. **The log head hash is written into each PayPal order's description**
    (and `log_head_at_creation`). That puts a copy of the chain state outside
-   our database, which is what detects truncation of the newest events.
+   our database. It covers history before order creation, not later events or a removed witness event unless its order id was retained independently.
 9. **Evidence bundles carry the full chain**, not just one mandate's events,
    because a hash chain can only be verified end to end. The cost is that a
    bundle may include other mandates' events. Fine for a single-user demo; a
@@ -30,12 +30,12 @@ Non-obvious choices, so they can be explained and challenged.
 10. **`verify_bundle` regenerates the summary from the events**, so the
     plain-language summary cannot be edited independently of the record.
 11. **Tamper-evident, not tamper-proof.** Someone who rebuilds the whole chain
-    and the bundle together is only caught by a head hash or public key
-    obtained elsewhere; `verify_bundle` takes both for that reason.
+    and the bundle together needs an independently retained head or external witness to expose it.
+    A trusted public key authenticates the mandate signer only, not the event history.
 12. **Sandbox only.** `PayPalClient` refuses any base URL except the sandbox.
-13. **Public demo is rate limited and cannot spend credentials.** Demo actions are
+13. **The server demo is rate limited; GitHub Pages has simulated PayPal.** Demo actions are
     limited per visitor and overall; dispute submission from the dashboard is off
-    unless `ALLOW_DISPUTE_SUBMIT=1`; each visitor gets an isolated in-memory demo.
+    unless `ALLOW_DISPUTE_SUBMIT=1`; each visitor gets an isolated in-memory demo. A server configured with sandbox credentials can create sandbox orders for visitors.
 14. **Timestamp anchoring instead of our own "publish the hash" scheme.** An RFC 3161
     authority needs no account, is independent of us, and its tokens verify offline
     with `openssl`. The request is built in pure Python (checked byte-for-byte against
@@ -62,3 +62,6 @@ Non-obvious choices, so they can be explained and challenged.
     thing (same fixed demo mandate id) shared a request id and PayPal returned the first session's order, with its stale
     log head. Found by running the witness check against the real sandbox. The id is now a hash of the intent and the
     signed mandate: stable for a replay under the same mandate, different for every mandate.
+
+20. **Dispute notes, not JSON attachments.** PayPal accepts image/PDF attachments, not JSON. Submission sends notes with the summary, head and bundle digest; retain the returned full bundle separately. This remains fake-transport tested only.
+21. **Single-owner ledger.** Orchestrator locks are instance-local; do not share a SQLite file across processes or multiple orchestrators. Webhook deduplication is serialized within one processor. Pending refunds keep budget reserved. Webhooks do not reconcile capture/refund state, and a local void cannot cancel a remotely approved order.

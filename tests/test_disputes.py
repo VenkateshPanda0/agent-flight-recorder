@@ -47,10 +47,8 @@ def test_dispute_is_matched_and_evidence_submitted(setup):
     types = [e.type for e in orch.ledger.events()]
     assert types.count(L.DISPUTE_OPENED) == 1 and types[-1] == L.EVIDENCE_SUBMITTED
     assert orch.ledger.verify().ok
-    # The attached file is a verifiable bundle and matches the logged digest.
-    start = fake.evidence.index(b"{", fake.evidence.index(b'filename='))
-    end = fake.evidence.rindex(b"\r\n--afr")
-    attached = json.loads(fake.evidence[start:end])
+    # The returned local bundle is verifiable and matches the submitted digest.
+    attached = result["bundle"]
     assert verify_bundle(attached).ok
     assert result["bundle_digest"] in fake.evidence.decode()
     logged = orch.ledger.events()[-1].payload
@@ -60,7 +58,7 @@ def test_dispute_is_matched_and_evidence_submitted(setup):
 def test_notes_are_capped(setup):
     _, handler, fake, signed = setup
     handler.submit_evidence("PP-D-1", signed)
-    notes = json.loads(fake.evidence.split(b"\r\n\r\n")[1].split(b"\r\n--")[0])["evidences"][0]["notes"]
+    notes = json.loads(fake.evidence)["evidences"][0]["notes"]
     assert len(notes) <= NOTES_LIMIT
 
 
@@ -98,6 +96,8 @@ def test_create_dispute_sends_buyer_assertion_and_amount():
     pad = lambda s: s + "=" * (-len(s) % 4)
     assert json.loads(base64.urlsafe_b64decode(pad(claims))) == {"iss": "my-client", "payer_id": "PAYER1"}
     assert sig == "" and seen["b"]["dispute_amount"]["value"] == "89.99"
+    assert "buyer_contacted_time" not in seen["b"]["extensions"]
+    assert "merchant_contacted" not in seen["b"]["extensions"]
 
 
 def test_create_dispute_falls_back_to_multipart_when_json_is_refused():
@@ -122,3 +122,11 @@ def test_create_dispute_falls_back_to_multipart_when_json_is_refused():
     assert seen[1][0]["Content-Type"].startswith("multipart/form-data; boundary=")
     assert b'name="input"' in seen[1][1] and b"PAYER1" not in seen[1][1]     # payer id only in the header
     assert "PayPal-Auth-Assertion" in seen[1][0]
+
+def test_disputes_submit_notes_without_unsupported_json_attachment(setup):
+    _, handler, fake, signed = setup
+    handler.submit_evidence('PP-D-1', signed)
+    assert fake.calls[-1][3]['Content-Type'] == 'application/json'
+    payload = json.loads(fake.evidence)
+    assert payload['evidences'][0]['evidence_type'] == 'OTHER'
+    assert 'attached' not in payload['evidences'][0]['notes'].lower()

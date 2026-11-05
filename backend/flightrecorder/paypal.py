@@ -275,6 +275,13 @@ class PayPalClient:
         self, dispute_id: str, payload: dict, filename: str, content: bytes
     ) -> dict:
         """Multipart variant: JSON ``input`` part plus one attached file."""
+        types = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                 "png": "image/png", "gif": "image/gif"}
+        mime = types.get(filename.rsplit(".", 1)[-1].lower())
+        if not mime or any(c in filename for c in '\r\n"/\\'):
+            raise PayPalError("Evidence requires a safe image or PDF filename; JSON is not supported.")
+        if not content or len(content) >= 10_000_000:
+            raise PayPalError("Evidence file must be nonempty and smaller than 10 MB.")
         boundary = "afr" + digest_boundary(content)
         crlf = b"\r\n"
         parts = [
@@ -282,7 +289,7 @@ class PayPalClient:
             b"Content-Type: application/json", b"", json.dumps(payload).encode(),
             b"--" + boundary.encode(),
             f'Content-Disposition: form-data; name="file1"; filename="{filename}"'.encode(),
-            b"Content-Type: application/json", b"", content,
+            f"Content-Type: {mime}".encode(), b"", content,
             b"--" + boundary.encode() + b"--", b"",
         ]
         return self._request(
@@ -305,9 +312,7 @@ class PayPalClient:
             "disputed_transactions": [{"buyer_transaction_id": buyer_transaction_id}],
             "reason": reason,
             "dispute_amount": {"currency_code": currency, "value": format_amount(amount_minor, currency)},
-            "extensions": {"merchant_contacted": True, "merchant_contacted_outcome": "NO_RESPONSE",
-                           "buyer_contacted_time": "2026-10-01T00:00:00.000Z",
-                           "merchandize_dispute_properties": {"issue_type": "PRODUCT"}},
+            "extensions": {"merchandize_dispute_properties": {"issue_type": "PRODUCT"}},
         }
         if note:
             payload["messages"] = [{"posted_by": "BUYER", "content": note[:2000]}]

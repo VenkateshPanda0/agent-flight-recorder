@@ -146,3 +146,25 @@ def test_paypal_witness_needs_the_real_sandbox_and_checks_orders(monkeypatch):
     app._client.get_order = lambda oid: {"purchase_units": [{"description": sent[oid]}]}
     rows = app.paypal_witness()
     assert len(rows) == 1 and rows[0]["matches_paypal"] is True
+
+def test_http_reader_rejects_invalid_lengths_and_non_objects():
+    from io import BytesIO
+    from flightrecorder.server import make_handler
+    handler_type = make_handler(None, None, False)
+    for length, body in [('-1', b'{}'), ('abc', b'{}'), ('2', b'[]')]:
+        handler = object.__new__(handler_type)
+        handler.headers = {'Content-Length': length}
+        handler.rfile = BytesIO(body)
+        responses = []
+        handler._json = lambda status, data: responses.append(status)
+        assert handler._read() is None
+        assert responses == [400]
+
+
+def test_rate_limiter_rejected_visitors_do_not_grow_memory():
+    from flightrecorder.server import RateLimiter
+    limiter = RateLimiter(overall=1)
+    assert limiter.allow('first', 0)
+    for i in range(100):
+        assert not limiter.allow(str(i), 0)
+    assert len(limiter._hits) == 1

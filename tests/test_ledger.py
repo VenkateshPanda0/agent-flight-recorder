@@ -222,3 +222,11 @@ def test_revoking_in_the_log_blocks_the_next_purchase(signed):
     assert evaluate(signed, make_intent(), log.mandate_state("m-1"), now).decision is Decision.ALLOW
     log.append(L.MANDATE_REVOKED, {"by": "user-1"}, mandate_id="m-1")
     assert evaluate(signed, make_intent(), log.mandate_state("m-1"), now).decision is Decision.DENY
+
+def test_duplicate_refund_cannot_release_another_orders_budget():
+    log = filled_ledger()
+    log.append(L.ORDER_CREATED, {'amount_minor': 5000}, mandate_id='m-1', order_ref='O-2')
+    for _ in range(2):
+        log.append(L.ORDER_REFUNDED, {'amount_minor': 8999, 'refund_id': 'R1'},
+                   mandate_id='m-1', order_ref='O-1')
+    assert log.mandate_state('m-1').committed_minor == 5000

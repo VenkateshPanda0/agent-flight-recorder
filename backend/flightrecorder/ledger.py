@@ -248,7 +248,8 @@ class Ledger:
         """
         amounts: dict[str, int] = {}
         voided: set[str] = set()
-        refunded = 0
+        refunded: dict[str, int] = {}
+        refund_ids: set[str] = set()
         revoked = False
 
         for event in self.events(mandate_id=mandate_id):
@@ -263,10 +264,15 @@ class Ledger:
             elif event.type == ORDER_VOIDED:
                 voided.add(ref)
             elif event.type == ORDER_REFUNDED:
-                refunded += int(event.payload.get("amount_minor", 0))
+                refund_id = event.payload.get("refund_id")
+                if refund_id and refund_id in refund_ids:
+                    continue
+                if refund_id:
+                    refund_ids.add(refund_id)
+                refunded[ref] = refunded.get(ref, 0) + max(int(event.payload.get("amount_minor", 0)), 0)
 
         live = {ref: amount for ref, amount in amounts.items() if ref not in voided}
-        committed = max(sum(live.values()) - refunded, 0)
+        committed = sum(max(amount - refunded.get(ref, 0), 0) for ref, amount in live.items())
         return MandateState(
             committed_minor=committed, order_count=len(live), revoked=revoked
         )

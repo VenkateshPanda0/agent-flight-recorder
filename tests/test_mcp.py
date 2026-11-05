@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -117,7 +118,8 @@ def test_stdio_roundtrip_like_a_real_client():
     """Spawn the server as a client such as Claude Desktop would, and speak newline-delimited JSON-RPC."""
     proc = subprocess.Popen([sys.executable, "-m", "flightrecorder.mcp_server"], stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                            env={"PYTHONPATH": BACKEND, "PATH": "/usr/bin:/bin", "AFR_MCP_PAYPAL": "simulated"})
+                            env={**{k: v for k, v in os.environ.items() if k.upper() in ("SYSTEMROOT", "PATH", "TEMP", "TMP")},
+                                 "PYTHONPATH": BACKEND, "AFR_MCP_PAYPAL": "simulated"})
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -130,3 +132,7 @@ def test_stdio_roundtrip_like_a_real_client():
     assert [r.get("id") for r in replies] == [1, 2, None]          # no reply to the notification; parse error last
     assert json.loads(replies[1]["result"]["content"][0]["text"])["decision"] == "DENY"
     assert replies[2]["error"]["code"] == -32700
+
+def test_non_string_tool_name_returns_protocol_error():
+    reply = McpServer().handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': []}})
+    assert reply['error']['code'] == -32602

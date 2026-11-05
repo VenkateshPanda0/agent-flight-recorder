@@ -8,6 +8,7 @@ retries and replays change nothing.
 from __future__ import annotations
 
 from typing import Mapping
+import threading
 
 from . import ledger as L
 from .disputes import DisputeError, DisputeHandler
@@ -20,6 +21,7 @@ class WebhookProcessor:
                  disputes: DisputeHandler | None = None) -> None:
         self.ledger, self.paypal, self.webhook_id = ledger, paypal, webhook_id
         self.disputes = disputes
+        self._lock = threading.Lock()
 
     def _seen(self, event_id: str) -> bool:
         return any(e.payload.get("event_id") == event_id
@@ -37,6 +39,10 @@ class WebhookProcessor:
             return 503, "could not verify signature"  # PayPal will retry
         if not genuine:
             return 401, "signature not verified"
+        with self._lock:
+            return self._record(event_id, event)
+
+    def _record(self, event_id: str, event: dict) -> tuple[int, str]:
         if self._seen(event_id):
             return 200, "duplicate"
 

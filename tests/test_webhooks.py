@@ -59,3 +59,28 @@ def test_dispute_created_opens_dispute(signed, keypair):
     wp.handle(HEADERS, {"id": "WH-EV-2", "event_type": "CUSTOMER.DISPUTE.CREATED",
                         "resource": {"dispute_id": "PP-D-1"}})
     assert any(e.type == L.DISPUTE_OPENED for e in orch.ledger.events())
+
+def test_concurrent_webhooks_are_logged_once(signed, keypair, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    orch, wp, _ = make(signed, keypair)
+    original = orch.ledger.append
+    entered, release = threading.Event(), threading.Event()
+    def paused_append(*args, **kwargs):
+        if args[0] == L.WEBHOOK_RECEIVED:
+            entered.set()
+            assert release.wait(3)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(orch.ledger, 'append', paused_append)
+    event = {'id': 'race', 'event_type': 'TEST'}
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(wp.handle, HEADERS, event)
+        assert entered.wait(3)
+        second = pool.submit(wp.handle, HEADERS, event)
+        # Give the second invocation an opportunity to reach the deduplication check.
+        import time
+        time.sleep(0.05)
+        release.set()
+        results = [first.result(), second.result()]
+    assert sorted(r[1] for r in results) == ['duplicate', 'ok']
+    assert sum(e.type == L.WEBHOOK_RECEIVED for e in orch.ledger.events()) == 1

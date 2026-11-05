@@ -41,6 +41,9 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
     for e in mine:
         iid = e["payload"].get("intent_id")
         if e["type"] == L.INTENT_SUBMITTED:
+            if "unhashable_intent" in e["payload"]:
+                # Rejected input is kept as text in the chain, not a purchase.
+                continue
             it = e["payload"]["intent"]
             total = sum(i["unit_price_minor"] * i["quantity"] for i in it["items"])
             intents[iid] = {

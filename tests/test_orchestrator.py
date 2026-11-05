@@ -35,7 +35,7 @@ class FakePayPal:
                 {"id": "CAP1", "status": "COMPLETED",
                  "amount": {"currency_code": "USD", "value": amt}}]}}]}
         if path.endswith("/refund"):
-            return 201, {"id": "REF1"}
+            return 201, {"id": "REF1", "status": "COMPLETED"}
         return 404, {}
 
     def _amount_for(self, order_id):
@@ -182,9 +182,10 @@ def test_provide_evidence_multipart_shape(fake):
         return orig(method, url, headers, body)
 
     client._transport = spy
-    client.provide_evidence_with_document("PP-D-1", {"evidences": []}, "e.json", b'{"a":1}')
+    client.provide_evidence_with_document("PP-D-1", {"evidences": []}, "e.pdf", b"%PDF-1.4 demo")
     assert seen["headers"]["Content-Type"].startswith("multipart/form-data; boundary=")
-    assert b'name="input"' in seen["body"] and b'filename="e.json"' in seen["body"]
+    assert b'name="input"' in seen["body"] and b'filename="e.pdf"' in seen["body"]
+    assert b"Content-Type: application/pdf" in seen["body"]
 
 
 def test_failed_paypal_call_can_be_retried_with_same_request_id(orch, fake):
@@ -217,3 +218,62 @@ def test_request_id_is_stable_within_a_mandate_but_differs_between_mandates(fake
         o.submit(make_intent(mandate_id=mandate_id))
         ids.append(fake.order_posts()[-1][3]["PayPal-Request-Id"])
     assert ids[0] != ids[1]
+
+def test_captured_order_cannot_be_voided(orch):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    with pytest.raises(OrchestratorError):
+        orch.void(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+
+
+def test_voided_order_cannot_be_captured(orch, fake):
+    order = orch.submit(make_intent()).order_id
+    orch.void(order)
+    before = len(fake.calls)
+    with pytest.raises(OrchestratorError):
+        orch.capture(order)
+    assert len(fake.calls) == before
+
+
+def test_refund_replay_is_rejected_before_network(orch, fake):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    orch.refund(order)
+    before = len(fake.calls)
+    with pytest.raises(OrchestratorError):
+        orch.refund(order)
+    assert len(fake.calls) == before
+
+
+def test_pending_refund_keeps_budget_reserved(orch, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    monkeypatch.setattr(orch.paypal, 'refund_capture', lambda *a, **kw: {'id': 'R', 'status': 'PENDING'})
+    with pytest.raises(OrchestratorError):
+        orch.refund(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+
+def test_unhashable_proposal_still_exports_verifiable_evidence(orch, signed):
+    from flightrecorder.evidence import build_bundle, verify_bundle
+    orch.submit(make_intent(claimed_total_minor=89.99))
+    assert verify_bundle(build_bundle(orch.ledger, signed)).ok
+
+def test_different_signers_do_not_share_payment_request_ids(fake, mandate):
+    from flightrecorder.mandate import generate_keypair, sign_mandate
+    ids = []
+    for _ in range(2):
+        private, public = generate_keypair()
+        orch = Orchestrator(Ledger(), PayPalClient(PayPalConfig('id', 'secret'), fake),
+                            trusted_public_key=public, clock=lambda: T0)
+        orch.grant(sign_mandate(mandate, private))
+        orch.submit(make_intent())
+        ids.append(fake.order_posts()[-1][3]['PayPal-Request-Id'])
+    assert ids[0] != ids[1]
+
+def test_evidence_upload_rejects_unsupported_or_unsafe_files(fake):
+    client = PayPalClient(PayPalConfig('id', 'secret'), fake)
+    for name, data in [('bundle.json', b'{}'), ('bad\r\n.pdf', b'%PDF'), ('large.pdf', b'x' * 10_000_000)]:
+        with pytest.raises(PayPalError):
+            client.provide_evidence_with_document('D', {}, name, data)
+    assert fake.calls == []

@@ -1,10 +1,8 @@
 """Dispute handling: link a PayPal dispute to the order it concerns, then
 answer it with the evidence bundle.
 
-The notes field is capped well under PayPal's limit, so the full bundle is
-attached as a document. The notes carry the plain-language summary plus the
-log head hash and the bundle digest, which let anyone check the attached
-file against what was submitted.
+The notes carry a bounded summary, log head hash and bundle digest. PayPal
+does not accept JSON attachments; retain the returned full bundle separately.
 """
 
 from __future__ import annotations
@@ -83,9 +81,7 @@ class DisputeHandler:
         bundle_digest = digest(bundle)
         notes = self._notes(bundle, bundle_digest, info["order_ref"], anchor_note)
         payload = {"evidences": [{"evidence_type": "OTHER", "notes": notes}]}
-        response = self.paypal.provide_evidence_with_document(
-            dispute_id, payload, f"evidence-{signed.mandate.mandate_id}.json", content
-        )
+        response = self.paypal.provide_evidence(dispute_id, payload)
         self.ledger.append(
             L.EVIDENCE_SUBMITTED,
             {"dispute_id": dispute_id, "bundle_digest": bundle_digest,
@@ -97,7 +93,7 @@ class DisputeHandler:
     @staticmethod
     def _notes(bundle: dict, bundle_digest: str, order_ref: str, anchor_note: str = "") -> str:
         tail = (f"\nLog head hash: {bundle['head_hash']}\nBundle digest: {bundle_digest}\n"
-                f"Order: {order_ref}{anchor_note}\nThe attached JSON file can be verified offline.")
+                f"Order: {order_ref}{anchor_note}\nFull JSON bundle retained separately for offline verification.")
         lines = "\n".join(bundle["summary"]["plain_language"])
         room = NOTES_LIMIT - len(tail)
         if len(lines) > room:

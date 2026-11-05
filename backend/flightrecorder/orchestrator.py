@@ -205,6 +205,8 @@ class Orchestrator:
     def capture(self, order_id: str) -> dict:
         with self._lock:
             mandate_id = self._order_mandate(order_id)
+            if any(e.type in (L.ORDER_VOIDED, L.ORDER_REFUNDED) for e in self.ledger.events(order_ref=order_id)):
+                raise OrchestratorError("A voided or refunded order cannot be captured.")
             data = self.paypal.capture_order(order_id, request_id=f"capture-{order_id}")
             unit = data["purchase_units"][0]
             capture = unit["payments"]["captures"][0]
@@ -228,6 +230,8 @@ class Orchestrator:
         so this records the release and gives the budget and slot back."""
         with self._lock:
             mandate_id = self._order_mandate(order_id)
+            if any(e.type == L.ORDER_CAPTURED for e in self.ledger.events(order_ref=order_id)):
+                raise OrchestratorError("A captured order must be refunded, not voided.")
             self.ledger.append(
                 L.ORDER_VOIDED, {"reason": reason}, mandate_id=mandate_id,
                 order_ref=order_id, ts=self._clock(),
@@ -236,16 +240,22 @@ class Orchestrator:
     def refund(self, order_id: str) -> dict:
         with self._lock:
             mandate_id = self._order_mandate(order_id)
+            if any(e.type == L.ORDER_REFUNDED for e in self.ledger.events(order_ref=order_id)):
+                raise OrchestratorError("Order has already been refunded.")
             captured = [
                 e for e in self.ledger.events(order_ref=order_id) if e.type == L.ORDER_CAPTURED
             ]
             if not captured:
                 raise OrchestratorError("Order has not been captured.")
             cap = captured[-1].payload
+            if cap.get("status") != "COMPLETED":
+                raise OrchestratorError("Capture is not completed; budget remains reserved.")
             data = self.paypal.refund_capture(
                 cap["capture_id"], cap["amount_minor"], cap["currency"],
                 request_id=f"refund-{cap['capture_id']}",
             )
+            if data.get("status") != "COMPLETED":
+                raise OrchestratorError("Refund is not completed; budget remains reserved.")
             self.ledger.append(
                 L.ORDER_REFUNDED,
                 {"amount_minor": cap["amount_minor"], "currency": cap["currency"],
@@ -262,7 +272,7 @@ class Orchestrator:
         intent id alone would make PayPal hand back an old order, with an old log head in its
         description, whenever two mandates (or two demo sessions) buy the same thing."""
         signed = self._find_mandate(intent.mandate_id)
-        return digest({"intent": iid, "mandate": signed.mandate.digest() if signed else None})
+        return digest({"intent": iid, "mandate": digest(signed.to_dict()) if signed else None})
 
     def _create_order(self, iid: str, intent: PurchaseIntent, verdict: Verdict) -> Outcome:
         head = self.ledger.head_hash()

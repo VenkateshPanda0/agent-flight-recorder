@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -81,8 +82,10 @@ def verify_token(head_hash: str, token: bytes, ca_path: str | None = None) -> An
         with open(path, "wb") as handle:
             handle.write(token)
         cmd = [openssl, "ts", "-verify", "-digest", imprint(head_hash).hex(), "-in", path]
-        cmd += ["-CAfile", ca_path] if ca_path and ca_path.endswith((".pem", ".crt")) else \
-            ["-CApath", ca_path or "/etc/ssl/certs"]
+        ca_path = ca_path or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR")
+        if ca_path:
+            cmd += ["-CAfile", ca_path] if ca_path.endswith((".pem", ".crt")) else ["-CApath", ca_path]
+        # Otherwise use OpenSSL's platform defaults (including SSL_CERT_FILE).
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             text = subprocess.run([openssl, "ts", "-reply", "-in", path, "-text"],

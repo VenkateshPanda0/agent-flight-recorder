@@ -39,7 +39,6 @@ class RateLimiter:
             self._all = [t for t in self._all if t > cutoff]
             mine = [t for t in self._hits.get(key, []) if t > cutoff]
             if len(mine) >= self.per_visitor or len(self._all) >= self.overall:
-                self._hits[key] = mine
                 return False
             mine.append(now)
             self._all.append(now)
@@ -100,14 +99,23 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
             self._send(status, json.dumps(obj).encode())
 
         def _read(self) -> dict | None:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length < 0 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": "invalid body length"})
+                return None
             if length > MAX_BODY:
                 self._json(413, {"error": "body too large"})
                 return None
             try:
-                return json.loads(self.rfile.read(length) or b"{}")
-            except ValueError:
-                self._json(400, {"error": "invalid JSON"})
+                data = json.loads(self.rfile.read(length) or b"{}")
+                if not isinstance(data, dict):
+                    raise ValueError
+                return data
+            except (ValueError, RecursionError):
+                self._json(400, {"error": "expected a JSON object"})
                 return None
 
         def do_GET(self):

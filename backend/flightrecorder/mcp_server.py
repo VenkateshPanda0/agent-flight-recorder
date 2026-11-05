@@ -155,6 +155,8 @@ class McpServer:
             return self._result(msg_id, {"tools": TOOLS})
         if method == "tools/call":
             name = params.get("name") if isinstance(params, dict) else None
+            if not isinstance(name, str):
+                return self._error(msg_id, -32602, "tool name must be a string")
             args = (params.get("arguments") if isinstance(params, dict) else None) or {}
             handler = {"get_mandate": self._get_mandate, "search_catalogue": self._search_catalogue,
                        "propose_purchase": self._propose_purchase, "get_evidence": self._get_evidence}.get(name)

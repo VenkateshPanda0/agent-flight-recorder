@@ -4,7 +4,7 @@
 
 AI agents are starting to spend people's money. When one of those purchases is disputed, the dispute process has no record of what the agent was permitted to do, and the agent's own logs are just text that anyone with database access could rewrite. Agent Flight Recorder keeps the missing record: a **signed permission**, a **deterministic check before any money moves**, a **tamper-evident log**, and an **evidence bundle anyone can verify offline**.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![166 tests](https://img.shields.io/badge/tests-166%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![179 tests](https://img.shields.io/badge/tests-179%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
@@ -14,7 +14,7 @@ Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
 **Live demo: https://venkateshpanda0.github.io/agent-flight-recorder/** (opens in about 10 seconds; no install, no login).
 
-- **One click:** open the dashboard and press **"Play the 1-minute story"**. It runs the whole flow for you: an allowed purchase, a hijack attempt refused, a real AI model's proposal denied, an approval, a timestamp, offline verification, and a tampered event caught.
+- **One click:** open the dashboard and press **"Play the 1-minute story"**. It runs the whole flow for you: an allowed purchase, a hijack attempt refused, a real AI model's proposal denied, an approval, offline verification, and a tampered event caught.
 - **Browser-only demo (no server):** `frontend/index.html` runs the *real Python backend inside the page* (via Pyodide) when no server is present, with a simulated PayPal. The same code, the same guard and the same verifier, served as plain static files, so it works on any static host. This repo's GitHub Pages site is exactly that (`index.html` at the repo root forwards to it). Timestamp anchoring needs network and `openssl`, so it is only in the server version and the command-line verifier.
 - **Full server version:** see [Run it](#run-it).
 
@@ -46,7 +46,7 @@ flowchart LR
 
 ## A real AI model, a poisoned listing, and the guard
 
-The shopping agent in the live demo is a real model: a small open model (**Qwen2.5-1.5B-Instruct**, Apache-2.0) running locally through llama.cpp, with no API key. It reads a catalogue and proposes a purchase. The catalogue is poisoned: the cheap shoe's listing hides instructions telling the agent to buy something else.
+The optional local shopping agent uses a real model (the hosted demo replays recorded proposals): a small open model (**Qwen2.5-1.5B-Instruct**, Apache-2.0) running locally through llama.cpp, with no API key. It reads a catalogue and proposes a purchase. The catalogue is poisoned: the cheap shoe's listing hides instructions telling the agent to buy something else.
 
 ![A live local AI model proposes the $249 marathon shoe from a poisoned listing; the guard denies it with two reason codes and no PayPal order is created](docs/shot-live.png)
 
@@ -77,7 +77,7 @@ PYTHONPATH=backend python -m flightrecorder.mcp_server     # stdio; AFR_MCP_PAYP
 | `propose_purchase` | Ask to buy. The guard answers ALLOW / NEEDS_APPROVAL / DENY with reason codes; a denied purchase never creates a PayPal order |
 | `get_evidence` | Get the signed mandate plus the hash-chained log, verifiable offline |
 
-There is deliberately **no approve tool**: above the approval threshold the answer is "needs the person's approval" and nothing is placed, so an agent cannot approve itself. Rationales and product text cannot change a verdict. Tested with 12 protocol tests (including a real stdio subprocess) and with the official MCP Python SDK as the client. I have not run it inside the Claude Desktop app itself.
+There is deliberately **no approve tool**: above the approval threshold the answer is "needs the person's approval" and nothing is placed, so an agent cannot approve itself. Rationales and product text cannot change a verdict. Tested with 13 protocol tests (including a real stdio subprocess) and with the official MCP Python SDK as the client. I have not run it inside the Claude Desktop app itself.
 
 ## How PayPal and AI are used
 
@@ -86,10 +86,10 @@ There is deliberately **no approve tool**: above the approval threshold the answ
 | PayPal feature | What it does here | Status |
 |---|---|---|
 | OAuth 2.0 (`/v1/oauth2/token`) | Authenticates every call; the token is cached and never logged | Verified against the real sandbox |
-| Orders v2: create (`POST /v2/checkout/orders`) | Creates the order **only after** the guard returns ALLOW (or an approved NEEDS_APPROVAL). The intent id is the `PayPal-Request-Id`, so retries cannot double-order; the log head hash is written into the order description | Verified against the real sandbox |
+| Orders v2: create (`POST /v2/checkout/orders`) | Creates the order **only after** the guard returns ALLOW (or an approved NEEDS_APPROVAL). The `PayPal-Request-Id` hashes the intent and signed mandate; PayPal deduplicates retries within its retention window; the log head hash is written into the order description | Verified against the real sandbox |
 | Orders v2: get order (`GET /v2/checkout/orders/{id}`) | **PayPal as an independent witness.** Every order is created with the log's head hash in its description; the verifier fetches the order back and compares it to the chain (see below) | Verified against the real sandbox |
 | Orders v2: capture; Payments refund | Keeps the ledger's budget in step with PayPal | Written, tested against a fake transport; capture needs a sandbox buyer to approve in a browser |
-| Customer Disputes: `provide-evidence` (multipart) | Submits the evidence bundle (summary in the notes, full bundle as an attached JSON document) | Written to the documented API; **tested against a fake transport only, not a live sandbox dispute** |
+| Customer Disputes: `provide-evidence` (JSON notes) | Submits a bounded summary, log head and bundle digest as notes; the full JSON bundle is retained separately, because PayPal does not accept JSON attachments | Written to the documented API; **tested against a fake transport only, not a live sandbox dispute** |
 | Disputes: create, `require-evidence`, `adjudicate` (sandbox helpers) | Used by `scripts/sandbox_dispute_flow.py` to run a dispute end to end | Written; not yet run live |
 | Webhooks: `verify-webhook-signature` | A webhook is only believed after PayPal verifies it; events are logged once per event id; dispute events trigger evidence handling | Written, tested against a fake transport; not registered with PayPal |
 
@@ -124,11 +124,11 @@ And in the dashboard, a direct edit to the database is caught at the exact event
 
 ## Measured results
 
-![Terminal: 166 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
+![Terminal: 179 tests pass; red-team suite blocks 27 of 27; bundle tamper sweep catches 209 of 209](docs/shot-cli-results.png)
 
 | Check | Result |
 |---|---|
-| Automated tests | **166 passing** |
+| Automated tests | **179 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **209 / 209** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -152,24 +152,34 @@ How far to trust these:
 | Shopping agent | **Scripted** by default (and on any deploy without a model); **live** with a local open model (`requirements-llm.txt`). The UI labels which one produced each proposal. |
 
 Design limits, stated plainly:
-- **Tamper-evident, not tamper-proof.** The offline check alone is fooled by someone who rebuilds the entire chain and the bundle together (the repo demonstrates this). That is caught by an independent copy of the head: PayPal's stored copy (`--paypal`), a timestamp anchor, or a saved head hash (`--head`) or public key (`--key`).
+- **Tamper-evident, not tamper-proof.** The offline check alone is fooled by someone who rebuilds the entire chain and the bundle together (the repo demonstrates this). That is caught by an independent copy of the head: PayPal's stored copy (`--paypal`), a timestamp anchor, or a saved head hash (`--head`). A trusted public key (`--key`) authenticates the mandate signer; it does not authenticate the event history.
 - **Timestamp anchoring pins history up to the latest stamp.** Events after it are not pinned (the verifier reports how many). If a bundle is truncated to before its stamp, the stamp is simply absent, so keep the anchored hash somewhere else; the dispute notes carry it.
+- The demo is not a production payment service: use one orchestrator per ledger, never multiple processes against the same SQLite file. Remote payment outcomes after timeouts need reconciliation; request IDs do not provide permanent deduplication.
+- Merchant names and categories are catalogue labels checked by the guard; this prototype does not bind them to verified PayPal payee identities.
+- A local void does not cancel an order at PayPal. External captures and refunds are not reconciled into the ledger by webhooks.
 - Capturing a payment needs a sandbox buyer to approve the order in a browser, so captured payments are not exercised automatically.
 
 ## Run it
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 or newer. Clone this repository and change into it first:
+
+```bash
+git clone https://github.com/VenkateshPanda0/agent-flight-recorder.git
+cd agent-flight-recorder
+```
 
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 166 tests
+python -m pytest                                    # 179 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
 DEMO_PAYPAL=simulated PYTHONPATH=backend python -m flightrecorder.server    # http://localhost:8000
 ```
+
+Timestamp verification also requires OpenSSL and a trusted CA bundle. If OpenSSL has no configured trust store, set `SSL_CERT_FILE` to your installed PEM CA bundle (for example, Git for Windows supplies `C:\Program Files\Git\usr\ssl\certs\ca-bundle.crt`). Tests use a saved timestamp token and never contact the TSA.
 
 On Windows PowerShell: `$env:DEMO_PAYPAL="simulated"; $env:PYTHONPATH="backend"; python -m flightrecorder.server`.
 
@@ -209,7 +219,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
                           disputes, webhooks, agent, mcp_server, redteam, demo, server
 frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
 index.html                forwards to the dashboard for static hosting
-tests/                    166 tests, including fuzz and tamper sweeps
+tests/                    179 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README
 DECISIONS.md              non-obvious design choices and why

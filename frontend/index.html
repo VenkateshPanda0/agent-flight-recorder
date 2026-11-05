@@ -133,7 +133,7 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
       <button id="witness" hidden>Cross-check with PayPal's copy</button>
     </div>
     <p class="note">The verifier recomputes every hash and the mandate signature with no database.</p>
-    <label class="note" for="disp">PayPal sandbox dispute id (to submit the bundle through the Disputes API)</label>
+    <label class="note" for="disp">PayPal sandbox dispute id (submit summary and bundle digest; keep the JSON bundle separately)</label>
     <input type="text" id="disp" placeholder="PP-D-12345">
     <div class="row"><button id="submitev">Submit evidence to dispute</button></div>
     <div id="evout" aria-live="polite"></div>
