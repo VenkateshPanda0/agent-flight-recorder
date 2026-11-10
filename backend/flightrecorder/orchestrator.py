@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
+from urllib.parse import urlsplit
 
 from . import ledger as L
 from .canonical import digest
@@ -280,37 +281,98 @@ class Orchestrator:
         with self._lock:
             self._require_intact_ledger()
             mandate_id = self._order_mandate(order_id)
-            if any(e.type == L.ORDER_REFUNDED for e in self.ledger.events(order_ref=order_id)):
+            events = self.ledger.events(order_ref=order_id)
+            if any(e.type == L.ORDER_REFUNDED for e in events):
                 raise OrchestratorError("Order has already been refunded.")
-            captured = [
-                e for e in self.ledger.events(order_ref=order_id) if e.type == L.ORDER_CAPTURED
-            ]
-            if not captured:
-                raise OrchestratorError("Order has not been captured.")
-            cap = captured[-1].payload
-            if cap.get("status") != "COMPLETED":
-                raise OrchestratorError("Capture is not completed; budget remains reserved.")
+            if any(e.type == L.REFUND_REQUESTED for e in events):
+                raise OrchestratorError("The previous refund must be reconciled before any further payment action.")
+            cap = self._completed_capture(events)
+            request_id = f"refund-{cap['capture_id']}"
+            self.ledger.append(L.REFUND_REQUESTED, {"request_id": request_id, "capture_id": cap["capture_id"]},
+                               mandate_id=mandate_id, order_ref=order_id, ts=self._clock())
             data = self.paypal.refund_capture(
                 cap["capture_id"], cap["amount_minor"], cap["currency"],
-                request_id=f"refund-{cap['capture_id']}",
+                request_id=request_id,
             )
-            if not isinstance(data, dict) or data.get("status") != "COMPLETED":
-                raise OrchestratorError("Refund is not completed; budget remains reserved.")
-            try:
-                refund_id = data["id"]
-                currency = data["amount"]["currency_code"]
-                amount = parse_amount(data["amount"]["value"], currency)
-                if (not isinstance(refund_id, str) or not refund_id.strip()
-                        or currency != cap["currency"] or amount != cap["amount_minor"]):
-                    raise ValueError
-            except (KeyError, TypeError, ValueError, PayPalError):
-                raise OrchestratorError("Refund confirmation does not match the request. Budget remains reserved.") from None
-            self.ledger.append(
-                L.ORDER_REFUNDED,
-                {"amount_minor": amount, "currency": currency, "refund_id": refund_id},
-                mandate_id=mandate_id, order_ref=order_id, ts=self._clock(),
-            )
+            if isinstance(data, dict) and data.get("status") == "PENDING":
+                refund_id = data.get("id")
+                if isinstance(refund_id, str) and refund_id.strip():
+                    self.ledger.append(L.REFUND_PENDING, {"refund_id": refund_id},
+                                       mandate_id=mandate_id, order_ref=order_id, ts=self._clock())
+            payload = self._refund_payload(data, cap)
+            self.ledger.append(L.ORDER_REFUNDED, payload, mandate_id=mandate_id,
+                               order_ref=order_id, ts=self._clock())
             return data
+
+    def reconcile_refund(self, order_id: str, refund_id: str | None = None) -> dict:
+        """Confirm a previous refund using GET; never submit another refund."""
+        with self._lock:
+            self._require_intact_ledger()
+            mandate_id = self._order_mandate(order_id)
+            events = self.ledger.events(order_ref=order_id)
+            previous = next((e.payload for e in reversed(events)
+                             if e.type in (L.ORDER_REFUNDED, L.REFUND_PENDING)), None)
+            recorded_id = previous.get("refund_id") if previous else None
+            if recorded_id and refund_id is not None and refund_id != recorded_id:
+                raise OrchestratorError("Refund ID differs from the recorded refund.")
+            if any(e.type == L.ORDER_REFUNDED for e in events):
+                return previous
+            if not any(e.type == L.REFUND_REQUESTED for e in events):
+                raise OrchestratorError("This order has no recorded refund attempt to reconcile.")
+            refund_id = recorded_id or refund_id
+            if not refund_id:
+                raise OrchestratorError("Supply the refund ID from the PayPal sandbox before reconciling.")
+            cap = self._completed_capture(events)
+            data = self.paypal.get_refund(refund_id)
+            if not isinstance(data, dict) or data.get("id") != refund_id:
+                raise OrchestratorError("PayPal refund ID does not match. Budget remains reserved.")
+            if not recorded_id and not self._refund_links_capture(data.get("links"), cap["capture_id"]):
+                raise OrchestratorError("PayPal refund does not identify the expected capture. Budget remains reserved.")
+            payload = self._refund_payload(data, cap)
+            payload["source"] = "paypal_refund_lookup"
+            self.ledger.append(L.ORDER_REFUNDED, payload, mandate_id=mandate_id,
+                               order_ref=order_id, ts=self._clock())
+            return payload
+
+    @staticmethod
+    def _completed_capture(events: list[L.Event]) -> dict:
+        captured = next((e.payload for e in reversed(events) if e.type == L.ORDER_CAPTURED), None)
+        if captured is None:
+            raise OrchestratorError("Order has not been captured.")
+        if captured.get("status") != "COMPLETED":
+            raise OrchestratorError("Capture is not completed; budget remains reserved.")
+        return captured
+
+    @staticmethod
+    def _refund_links_capture(links, capture_id: str) -> bool:
+        if not isinstance(links, list):
+            return False
+        for link in links:
+            if not isinstance(link, dict) or link.get("rel") != "up" or not isinstance(link.get("href"), str):
+                continue
+            try:
+                url = urlsplit(link["href"])
+            except ValueError:
+                continue
+            if (url.scheme == "https" and url.hostname in ("api-m.sandbox.paypal.com", "api.sandbox.paypal.com")
+                    and url.path == f"/v2/payments/captures/{capture_id}"):
+                return True
+        return False
+
+    @staticmethod
+    def _refund_payload(data: dict, cap: dict) -> dict:
+        if not isinstance(data, dict) or data.get("status") != "COMPLETED":
+            raise OrchestratorError("Refund is not completed; budget remains reserved.")
+        try:
+            refund_id = data["id"]
+            currency = data["amount"]["currency_code"]
+            amount = parse_amount(data["amount"]["value"], currency)
+            if (not isinstance(refund_id, str) or not refund_id.strip()
+                    or currency != cap["currency"] or amount != cap["amount_minor"]):
+                raise ValueError
+        except (KeyError, TypeError, ValueError, PayPalError):
+            raise OrchestratorError("Refund confirmation does not match the request. Budget remains reserved.") from None
+        return {"amount_minor": amount, "currency": currency, "refund_id": refund_id}
 
     # -- internals ---------------------------------------------------------
 

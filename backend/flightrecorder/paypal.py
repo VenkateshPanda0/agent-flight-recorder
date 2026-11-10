@@ -297,6 +297,9 @@ class PayPalClient:
             extra_headers={"Prefer": "return=representation"},
         )
 
+    def get_refund(self, refund_id: str) -> dict:
+        return self._request("GET", f"/v2/payments/refunds/{_resource_id(refund_id)}")
+
     # -- disputes ----------------------------------------------------------
 
     def list_disputes(self, page_size: int = 10) -> dict:

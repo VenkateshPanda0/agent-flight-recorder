@@ -5,6 +5,7 @@ Route A (the realistic one): the buyer opens the dispute in the sandbox UI.
   (open the link, log in as a SANDBOX buyer, approve)
   python scripts/sandbox_dispute_flow.py capture           # captures the payment, prints the transaction id
   python scripts/sandbox_dispute_flow.py reconcile-capture # read-only lookup after a timeout or pending capture
+  python scripts/sandbox_dispute_flow.py reconcile-refund [refund-id] # confirm a previously recorded refund attempt
   (as the same sandbox buyer, open a dispute for that transaction at sandbox.paypal.com > Resolution Center)
   python scripts/sandbox_dispute_flow.py evidence PP-D-... # links the dispute to the order, answers it with the evidence
 
@@ -99,6 +100,18 @@ def report_capture(capture_id: str, status: str) -> None:
     print("Then run:  python scripts/sandbox_dispute_flow.py evidence <dispute id, like PP-D-12345>")
 
 
+def reconcile_refund(refund_id: str | None = None):
+    st = json.loads(STATE.read_text(encoding="utf-8"))
+    client, ledger = build()
+    try:
+        refund = Orchestrator(ledger, client).reconcile_refund(st["order_id"], refund_id)
+    except (OrchestratorError, PayPalError) as exc:
+        raise SystemExit(f"Refund could not be reconciled: {exc}") from None
+    finally:
+        ledger.close()
+    print("Confirmed refund:", refund["refund_id"])
+
+
 def save_submitted_bundle(result: dict) -> None:
     out = ROOT / f".afr_bundle_{result['bundle_digest']}.json"
     out.write_text(json.dumps(result["bundle"], indent=1), encoding="utf-8")
@@ -177,6 +190,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "evidence" and len(sys.argv) == 3:
         evidence(sys.argv[2])
+    elif cmd == "reconcile-refund" and len(sys.argv) in (2, 3):
+        reconcile_refund(sys.argv[2] if len(sys.argv) == 3 else None)
     else:
         {"start": start, "capture": capture, "reconcile-capture": reconcile_capture,
          "finish": finish, "all": everything}.get(cmd, lambda: print(__doc__))()

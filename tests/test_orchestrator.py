@@ -255,6 +255,62 @@ def test_pending_refund_keeps_budget_reserved(orch, monkeypatch):
         orch.refund(order)
     assert orch.ledger.mandate_state('m-1').committed_minor == 8999
 
+
+def test_pending_refund_reconciliation_reads_existing_refund_and_releases_budget_once(orch, fake, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    amount = {'currency_code': 'USD', 'value': '89.99'}
+    requests = []
+
+    def transport(method, url, headers, body):
+        if '/v2/payments/' not in url:
+            return fake(method, url, headers, body)
+        requests.append((method, url))
+        if method == 'POST':
+            return 201, {'id': 'REF1', 'status': 'PENDING', 'amount': amount}
+        assert url.endswith('/v2/payments/refunds/REF1')
+        return 200, {'id': 'REF1', 'status': 'COMPLETED', 'amount': amount}
+
+    monkeypatch.setattr(orch.paypal, '_transport', transport)
+    with pytest.raises(OrchestratorError, match='not completed'):
+        orch.refund(order)
+    with pytest.raises(OrchestratorError, match='reconciled'):
+        orch.refund(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+    assert orch.reconcile_refund(order)['refund_id'] == 'REF1'
+    assert orch.reconcile_refund(order)['refund_id'] == 'REF1'
+    assert [method for method, _ in requests] == ['POST', 'GET']
+    assert orch.ledger.mandate_state('m-1').committed_minor == 0
+    assert sum(e.type == L.ORDER_REFUNDED for e in orch.ledger.events()) == 1
+
+
+def test_refund_timeout_blocks_retry_and_requires_proof_of_capture(orch, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append('refund')
+        raise PayPalError('timeout')
+
+    monkeypatch.setattr(orch.paypal, 'refund_capture', timeout)
+    with pytest.raises(PayPalError):
+        orch.refund(order)
+    with pytest.raises(OrchestratorError, match='reconciled'):
+        orch.refund(order)
+    assert calls == ['refund']
+
+    with pytest.raises(OrchestratorError, match='refund ID'):
+        orch.reconcile_refund(order)
+    remote = {'id': 'REF1', 'status': 'COMPLETED', 'amount': {'currency_code': 'USD', 'value': '89.99'}}
+    monkeypatch.setattr(orch.paypal, 'get_refund', lambda _: remote)
+    with pytest.raises(OrchestratorError, match='capture'):
+        orch.reconcile_refund(order, 'REF1')
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+    remote['links'] = [{'rel': 'up', 'href': 'https://api-m.sandbox.paypal.com/v2/payments/captures/CAP1'}]
+    assert orch.reconcile_refund(order, 'REF1')['refund_id'] == 'REF1'
+    assert orch.ledger.mandate_state('m-1').committed_minor == 0
+
 def test_unhashable_proposal_still_exports_verifiable_evidence(orch, signed):
     from flightrecorder.evidence import build_bundle, verify_bundle
     orch.submit(make_intent(claimed_total_minor=89.99))

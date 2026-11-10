@@ -28,6 +28,9 @@ Non-obvious choices, so they can be explained and challenged.
    requested amount and currency and supplies a refund ID.
    A recorded capture attempt can be reconciled with a read-only lookup of its order.
    Missing or mismatched capture details leave the reservation in place.
+   A refund attempt is also recorded before sending and cannot be resent automatically.
+   The read-only refund lookup can settle it when the ID, amount, and currency match.
+   An ID supplied after a timeout must link back to the recorded capture.
 7. **Void is a ledger release, not a PayPal call.** An approved-but-unpaid
    CREATED order has no void endpoint; it lapses on PayPal's side.
 8. **The log head hash is written into each PayPal order's description**
