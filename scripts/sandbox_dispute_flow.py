@@ -4,6 +4,7 @@ Route A (the realistic one): the buyer opens the dispute in the sandbox UI.
   python scripts/sandbox_dispute_flow.py start             # creates a guarded order, prints approve link
   (open the link, log in as a SANDBOX buyer, approve)
   python scripts/sandbox_dispute_flow.py capture           # captures the payment, prints the transaction id
+  python scripts/sandbox_dispute_flow.py reconcile-capture # read-only lookup after a timeout or pending capture
   (as the same sandbox buyer, open a dispute for that transaction at sandbox.paypal.com > Resolution Center)
   python scripts/sandbox_dispute_flow.py evidence PP-D-... # links the dispute to the order, answers it with the evidence
 
@@ -26,7 +27,7 @@ from flightrecorder.disputes import DisputeHandler
 from flightrecorder.guard import LineItem, PurchaseIntent
 from flightrecorder.ledger import Ledger
 from flightrecorder.mandate import SignedMandate, generate_keypair, new_mandate, sign_mandate, utc_now
-from flightrecorder.orchestrator import Orchestrator
+from flightrecorder.orchestrator import Orchestrator, OrchestratorError
 from flightrecorder.paypal import PayPalClient, PayPalConfig, PayPalError
 
 STATE = ROOT / ".afr_flow.json"
@@ -73,7 +74,25 @@ def capture():
     if order.get("status") != "APPROVED":
         raise SystemExit("Order is not approved yet; approve it in the browser first.")
     cap = orch.capture(st["order_id"])
-    capture_id = cap["purchase_units"][0]["payments"]["captures"][0]["id"]
+    payment = cap["purchase_units"][0]["payments"]["captures"][0]
+    report_capture(payment["id"], payment["status"])
+
+
+def reconcile_capture():
+    st = json.loads(STATE.read_text(encoding="utf-8"))
+    client, ledger = build()
+    try:
+        payment = Orchestrator(ledger, client).reconcile_capture(st["order_id"])
+    except (OrchestratorError, PayPalError) as exc:
+        raise SystemExit(f"Capture could not be reconciled: {exc}") from None
+    finally:
+        ledger.close()
+    report_capture(payment["capture_id"], payment["status"])
+
+
+def report_capture(capture_id: str, status: str) -> None:
+    if status != "COMPLETED":
+        raise SystemExit("Capture is pending. Run `python scripts/sandbox_dispute_flow.py reconcile-capture` to check again.")
     print("Captured. Transaction id:", capture_id)
     print("Now, as the same SANDBOX buyer, open a dispute for this transaction in the Resolution Center at")
     print("  https://www.sandbox.paypal.com/ (Activity > the payment > Report a problem).")
@@ -116,7 +135,10 @@ def finish():
         raise SystemExit("Order is not approved yet; approve it in the browser first.")
     payer_id = order["payer"]["payer_id"]
     cap = orch.capture(st["order_id"])
-    capture_id = cap["purchase_units"][0]["payments"]["captures"][0]["id"]
+    payment = cap["purchase_units"][0]["payments"]["captures"][0]
+    if payment["status"] != "COMPLETED":
+        report_capture(payment["id"], payment["status"])
+    capture_id = payment["id"]
     print("Captured:", capture_id)
     try:
         d = client.create_dispute(buyer_transaction_id=capture_id, reason="MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
@@ -156,4 +178,5 @@ if __name__ == "__main__":
     if cmd == "evidence" and len(sys.argv) == 3:
         evidence(sys.argv[2])
     else:
-        {"start": start, "capture": capture, "finish": finish, "all": everything}.get(cmd, lambda: print(__doc__))()
+        {"start": start, "capture": capture, "reconcile-capture": reconcile_capture,
+         "finish": finish, "all": everything}.get(cmd, lambda: print(__doc__))()

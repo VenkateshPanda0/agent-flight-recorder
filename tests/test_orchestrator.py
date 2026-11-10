@@ -492,6 +492,64 @@ def test_tampered_ledger_blocks_payment_and_budget_changes(orch, fake, action):
     assert len(orch.ledger.events()) == events_before
 
 
+def test_capture_reconciliation_recovers_timeout_without_second_capture(orch, fake, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    captures, lookups = [], []
+
+    def timeout(order_id, **kwargs):
+        captures.append(order_id)
+        raise PayPalError('timeout')
+
+    state = {'id': 'CAP1', 'status': 'PENDING', 'amount': {'currency_code': 'USD', 'value': '89.99'}}
+
+    def lookup(order_id):
+        lookups.append(order_id)
+        return {'id': order_id, 'purchase_units': [{'payments': {'captures': [dict(state)]}}]}
+
+    monkeypatch.setattr(orch.paypal, 'capture_order', timeout)
+    monkeypatch.setattr(orch.paypal, 'get_order', lookup)
+    with pytest.raises(PayPalError):
+        orch.capture(order)
+    assert orch.reconcile_capture(order)['status'] == 'PENDING'
+    before = orch.ledger.head_hash()
+    assert orch.reconcile_capture(order)['status'] == 'PENDING'
+    assert orch.ledger.head_hash() == before
+    state.update(id='OTHER', status='COMPLETED')
+    with pytest.raises(OrchestratorError, match='capture ID'):
+        orch.reconcile_capture(order)
+    assert orch.ledger.head_hash() == before
+    state['id'] = 'CAP1'
+    completed = orch.reconcile_capture(order)
+    assert completed['status'] == 'COMPLETED'
+    assert orch.reconcile_capture(order) == completed
+    assert captures == [order] and lookups == [order] * 4
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+    orch.refund(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 0
+
+
+def test_capture_reconciliation_requires_matching_order_and_local_attempt(orch, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    lookups = []
+
+    def lookup(order_id):
+        lookups.append(order_id)
+        return {'id': 'DIFFERENT', 'purchase_units': []}
+
+    monkeypatch.setattr(orch.paypal, 'get_order', lookup)
+    with pytest.raises(OrchestratorError, match='no unresolved capture'):
+        orch.reconcile_capture(order)
+    assert not lookups
+    monkeypatch.setattr(orch.paypal, 'capture_order', lambda *a, **kw: {})
+    with pytest.raises(OrchestratorError):
+        orch.capture(order)
+    before = orch.ledger.head_hash()
+    with pytest.raises(OrchestratorError, match='order ID'):
+        orch.reconcile_capture(order)
+    assert lookups == [order]
+    assert orch.ledger.head_hash() == before
+
+
 def test_interrupted_order_request_still_reserves_budget_after_reopen(tmp_path, fake, signed, keypair, monkeypatch):
     path = str(tmp_path / 'orders.sqlite')
     client = PayPalClient(PayPalConfig('id', 'secret'), fake)

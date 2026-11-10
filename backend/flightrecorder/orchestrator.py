@@ -228,32 +228,37 @@ class Orchestrator:
                                        mandate_id=mandate_id, order_ref=order_id, ts=self._clock())
                 raise
             created = next(e.payload for e in events if e.type == L.ORDER_CREATED)
-            try:
-                unit, = data["purchase_units"]
-                capture, = unit["payments"]["captures"]
-                currency = capture["amount"]["currency_code"]
-                amount = parse_amount(capture["amount"]["value"], currency)
-                capture_id = capture["id"]
-                status = capture["status"]
-                if (not isinstance(capture_id, str) or not capture_id.strip()
-                        or status not in ("COMPLETED", "PENDING")
-                        or currency != created["currency"] or amount != created["amount_minor"]):
-                    raise ValueError
-            except (KeyError, TypeError, ValueError, PayPalError):
-                raise OrchestratorError("Capture response could not be confirmed. Budget remains reserved.") from None
-            self.ledger.append(
-                L.ORDER_CAPTURED,
-                {
-                    "amount_minor": amount,
-                    "currency": currency,
-                    "capture_id": capture_id,
-                    "status": status,
-                },
-                mandate_id=mandate_id,
-                order_ref=order_id,
-                ts=self._clock(),
-            )
+            payload = self._capture_payload(data, created)
+            self.ledger.append(L.ORDER_CAPTURED, payload, mandate_id=mandate_id,
+                               order_ref=order_id, ts=self._clock())
             return data
+
+    def reconcile_capture(self, order_id: str) -> dict:
+        """Resolve a recorded capture attempt with a read-only PayPal order lookup."""
+        with self._lock:
+            self._require_intact_ledger()
+            mandate_id = self._order_mandate(order_id)
+            events = self.ledger.events(order_ref=order_id)
+            if any(e.type in (L.ORDER_VOIDED, L.ORDER_REFUNDED) for e in events):
+                raise OrchestratorError("A voided or refunded order cannot be reconciled.")
+            previous = next((e.payload for e in reversed(events) if e.type == L.ORDER_CAPTURED), None)
+            if previous and previous.get("status") == "COMPLETED":
+                return previous
+            if not self._capture_unresolved(events):
+                raise OrchestratorError("This order has no unresolved capture to reconcile.")
+            order = self.paypal.get_order(order_id)
+            if not isinstance(order, dict) or order.get("id") != order_id:
+                raise OrchestratorError("PayPal order ID does not match. Budget remains reserved.")
+            created = next(e.payload for e in events if e.type == L.ORDER_CREATED)
+            payload = self._capture_payload(order, created)
+            if previous and previous.get("capture_id") != payload["capture_id"]:
+                raise OrchestratorError("PayPal capture ID changed. Budget remains reserved.")
+            payload["source"] = "paypal_order_lookup"
+            if previous and previous.get("status") == payload["status"]:
+                return previous
+            self.ledger.append(L.ORDER_CAPTURED, payload, mandate_id=mandate_id,
+                               order_ref=order_id, ts=self._clock())
+            return payload
 
     def void(self, order_id: str, reason: str = "") -> None:
         """Release an unpaid order. Unapproved PayPal orders simply lapse,
@@ -313,6 +318,22 @@ class Orchestrator:
         check = self.ledger.verify()
         if not check.ok:
             raise OrchestratorError(f"Ledger integrity check failed at event #{check.first_bad_seq}.")
+
+    @staticmethod
+    def _capture_payload(data: dict, created: dict) -> dict:
+        try:
+            unit, = data["purchase_units"]
+            capture, = unit["payments"]["captures"]
+            currency = capture["amount"]["currency_code"]
+            amount = parse_amount(capture["amount"]["value"], currency)
+            capture_id, status = capture["id"], capture["status"]
+            if (not isinstance(capture_id, str) or not capture_id.strip()
+                    or status not in ("COMPLETED", "PENDING")
+                    or currency != created["currency"] or amount != created["amount_minor"]):
+                raise ValueError
+        except (KeyError, TypeError, ValueError, PayPalError):
+            raise OrchestratorError("Capture response could not be confirmed. Budget remains reserved.") from None
+        return {"amount_minor": amount, "currency": currency, "capture_id": capture_id, "status": status}
 
     @staticmethod
     def _capture_unresolved(events: list[L.Event]) -> bool:

@@ -26,6 +26,8 @@ Non-obvious choices, so they can be explained and challenged.
    Capture attempts are logged before sending. Pending or uncertain captures block void and
    repeat capture until reconciled. Refunds release budget only after PayPal confirms the
    requested amount and currency and supplies a refund ID.
+   A recorded capture attempt can be reconciled with a read-only lookup of its order.
+   Missing or mismatched capture details leave the reservation in place.
 7. **Void is a ledger release, not a PayPal call.** An approved-but-unpaid
    CREATED order has no void endpoint; it lapses on PayPal's side.
 8. **The log head hash is written into each PayPal order's description**
