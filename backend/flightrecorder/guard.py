@@ -172,7 +172,7 @@ def evaluate(
             )
         )
 
-    merchant = intent.merchant_id.strip().lower()
+    merchant = intent.merchant_id.strip().lower() if isinstance(intent.merchant_id, str) else ""
     if merchant not in mandate.allowed_merchants:
         hard.append(
             Reason(Code.MERCHANT_NOT_ALLOWED, f"Merchant '{merchant}' is not on the mandate.")
@@ -183,6 +183,10 @@ def evaluate(
 
     items_valid = True
     for item in intent.items:
+        if not isinstance(item.name, str) or not item.name.strip() or not isinstance(item.category, str):
+            items_valid = False
+            hard.append(Reason(Code.INVALID_LINE_ITEM, "Item needs a name and a text category."))
+            continue
         if not _is_positive_int(item.unit_price_minor) or not _is_positive_int(item.quantity):
             items_valid = False
             hard.append(
@@ -207,7 +211,7 @@ def evaluate(
     # figure the agent claims, so an under-reported total cannot slip through.
     if items_valid and intent.items:
         total = intent.computed_total_minor
-        if intent.claimed_total_minor != total:
+        if type(intent.claimed_total_minor) is not int or intent.claimed_total_minor != total:
             hard.append(
                 Reason(
                     Code.TOTAL_MISMATCH,

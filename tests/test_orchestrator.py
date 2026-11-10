@@ -342,3 +342,22 @@ def test_orchestrators_sharing_ledger_cannot_overspend(orch, fake):
         outcomes = [first.result(), again.result()]
     assert sorted(o.status for o in outcomes) == ['DENIED', 'ORDER_CREATED']
     assert len(fake.order_posts()) == 1
+
+
+@pytest.mark.parametrize('changes', [
+    {'merchant_id': None},
+    {'items': (LineItem('Shoe', None, 8999),)},
+    {'items': (LineItem(None, 'footwear', 8999),)},
+    {'items': (LineItem('Shoe', 'footwear', '8999'),), 'claimed_total_minor': 8999},
+    {'items': (LineItem('Shoe', 'footwear', 1),), 'claimed_total_minor': True},
+])
+def test_malformed_purchase_is_denied_and_evidence_still_verifies(orch, fake, signed, changes):
+    from flightrecorder.evidence import build_bundle, verify_bundle
+    from flightrecorder.guard import PurchaseIntent
+
+    intent = PurchaseIntent(**{**vars(make_intent()), **changes})
+    assert orch.submit(intent).status == 'DENIED'
+    assert not fake.calls
+    bundle = build_bundle(orch.ledger, signed)
+    assert bundle['summary']['intents_denied'] == 1
+    assert verify_bundle(bundle).ok

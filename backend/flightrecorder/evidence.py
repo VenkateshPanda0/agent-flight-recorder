@@ -45,7 +45,10 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
                 # Rejected input is kept as text in the chain, not a purchase.
                 continue
             it = e["payload"]["intent"]
-            total = sum(i["unit_price_minor"] * i["quantity"] for i in it["items"])
+            items = it["items"]
+            total = None
+            if all(isinstance(i["unit_price_minor"], int) and isinstance(i["quantity"], int) for i in items):
+                total = sum(i["unit_price_minor"] * i["quantity"] for i in items)
             intents[iid] = {
                 "intent_id": iid, "merchant": it["merchant_id"], "amount_minor": total,
                 "currency": it["currency"], "verdict": None, "reason_codes": [],
@@ -81,7 +84,8 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
         f"valid {m['created_at']} to {m['expires_at']}."
     ]
     for r in rows:
-        what = f"{_money(r['amount_minor'], r['currency'])} at {r['merchant']}"
+        amount = "invalid amount" if r["amount_minor"] is None else _money(r["amount_minor"], r["currency"])
+        what = f"{amount} at {r['merchant']}"
         if r["verdict"] == "DENY":
             lines.append(f"Refused before any PayPal order existed: {what} ({', '.join(r['reason_codes'])}).")
         elif r["order_id"]:
