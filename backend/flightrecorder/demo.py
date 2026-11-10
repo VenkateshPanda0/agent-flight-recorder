@@ -20,7 +20,6 @@ from .mandate import generate_keypair, new_mandate, sign_mandate, utc_now
 from .orchestrator import Orchestrator
 from .paypal import PayPalClient, PayPalConfig, PayPalError
 
-MANDATE_ID = "demo-mandate-1"
 AGENT_ID = "agent-shopper"
 REQUEST = "Buy me one pair of running shoes under $120."
 
@@ -123,7 +122,7 @@ class DemoApp:
             total_budget_minor=25_000, per_order_cap_minor=12_000,
             approval_threshold_minor=10_000, allowed_merchants=["shoes.example"],
             allowed_categories=["footwear"], max_orders=3, created_at=now,
-            expires_at=now + timedelta(days=7), mandate_id=MANDATE_ID,
+            expires_at=now + timedelta(days=7),
         )
         self.signed = sign_mandate(mandate, self.key)
         self.ledger = Ledger()
@@ -151,7 +150,7 @@ class DemoApp:
         catalogue = poisoned_catalogue() if name == "live" else CATALOGUE
         with _live_lock:
             proposal = proposer.propose(REQUEST, catalogue)
-        intent = to_intent(proposal, catalogue, mandate_id=MANDATE_ID, agent_id=AGENT_ID)
+        intent = to_intent(proposal, catalogue, mandate_id=self.signed.mandate.mandate_id, agent_id=AGENT_ID)
         out = self.orch.submit(intent)
         return {
             "scenario": title, "agent": proposer.label, "proposal": proposal,
@@ -172,7 +171,7 @@ class DemoApp:
         number = self.replay_index % len(runs) + 1
         self.replay_index += 1
         proposal = rec["proposal"]
-        intent = to_intent(proposal, CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID)
+        intent = to_intent(proposal, CATALOGUE, mandate_id=self.signed.mandate.mandate_id, agent_id=AGENT_ID)
         out = self.orch.submit(intent)
         return {
             "scenario": title, "agent": "recorded-llm", "proposal": proposal,
@@ -192,7 +191,7 @@ class DemoApp:
                 "reasons": [r.to_dict() for r in out.verdict.reasons]}
 
     def revoke(self) -> None:
-        self.orch.revoke(MANDATE_ID, "revoked from dashboard")
+        self.orch.revoke(self.signed.mandate.mandate_id, "revoked from dashboard")
 
     def bundle(self) -> dict:
         return build_bundle(self.ledger, self.signed)
@@ -254,7 +253,7 @@ class DemoApp:
             "paypal_mode": self.paypal_mode,
             "mandate": m.to_payload(), "public_key": self.public_key,
             "signature": self.signed.signature,
-            "mandate_state": vars(self.ledger.mandate_state(MANDATE_ID)),
+            "mandate_state": vars(self.ledger.mandate_state(m.mandate_id)),
             "events": events, "head_hash": self.ledger.head_hash(),
             "chain": self.verify_current(),
             "scenarios": {k: v[0] for k, v in SCENARIOS.items() if k != "live" or live_available()},

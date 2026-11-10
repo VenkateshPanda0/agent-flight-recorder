@@ -25,7 +25,7 @@ import sys
 from typing import Any
 
 from .agent import CATALOGUE, to_intent
-from .demo import AGENT_ID, MANDATE_ID, DemoApp
+from .demo import AGENT_ID, DemoApp
 from .evidence import build_bundle
 
 SERVER_INFO = {"name": "agent-flight-recorder", "version": "0.1.0"}
@@ -109,7 +109,7 @@ class McpServer:
             return _text("Invalid arguments: sku must be a string and quantity an integer.", is_error=True)
         try:
             intent = to_intent({"sku": sku, "quantity": quantity, "rationale": str(args.get("rationale", ""))[:500]},
-                               CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID)
+                               CATALOGUE, mandate_id=self.app.signed.mandate.mandate_id, agent_id=AGENT_ID)
         except ValueError as exc:
             return _text(f"Unknown product: {exc}", is_error=True)
         out = self.app.orch.submit(intent)

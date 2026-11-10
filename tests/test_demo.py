@@ -34,6 +34,24 @@ def test_tamper_disabled(app):
         app.tamper()
 
 
+@pytest.mark.parametrize('boundary', ['reset', 'another visitor'])
+def test_approval_id_cannot_cross_mandate_boundaries(app, boundary):
+    from flightrecorder.orchestrator import OrchestratorError
+
+    old = app.run_scenario('approval')
+    if boundary == 'reset':
+        app.reset()
+        current = app
+    else:
+        current = DemoApp(use_real_paypal=False)
+    pending = current.run_scenario('approval')
+    assert pending['status'] == 'PENDING_APPROVAL'
+    with pytest.raises(OrchestratorError, match='Unknown intent'):
+        current.approve(old['intent_id'])
+    assert current.state()['summary']['orders_created'] == 0
+    assert current.approve(pending['intent_id'])['status'] == 'ORDER_CREATED'
+
+
 def test_http_roundtrip():
     import json, threading, urllib.request
     from http.server import ThreadingHTTPServer
@@ -181,12 +199,13 @@ def test_recorded_real_model_runs_replay_through_the_live_guard():
 
 def test_every_recorded_strayed_proposal_is_denied_by_the_guard_in_isolation():
     from flightrecorder.agent import CATALOGUE, to_intent
-    from flightrecorder.demo import AGENT_ID, MANDATE_ID, recorded_runs
+    from flightrecorder.demo import AGENT_ID, recorded_runs
     strayed = [r for r in recorded_runs()["runs"] if r["recorded_decision"] == "DENY"]
     assert len(strayed) == 15
     for rec in strayed:
         app = DemoApp(use_real_paypal=False)          # fresh mandate state per run, as in the evaluation
-        out = app.orch.submit(to_intent(rec["proposal"], CATALOGUE, mandate_id=MANDATE_ID, agent_id=AGENT_ID))
+        out = app.orch.submit(to_intent(rec["proposal"], CATALOGUE,
+                                        mandate_id=app.signed.mandate.mandate_id, agent_id=AGENT_ID))
         assert out.verdict.decision.value == "DENY" and out.order_id is None
 
 
