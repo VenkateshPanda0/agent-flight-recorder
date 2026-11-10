@@ -35,6 +35,8 @@ APPROVAL_DENIED = "APPROVAL_DENIED"
 ORDER_CREATED = "ORDER_CREATED"
 ORDER_CAPTURED = "ORDER_CAPTURED"
 ORDER_FAILED = "ORDER_FAILED"
+ORDER_REQUESTED = "ORDER_REQUESTED"
+ORDER_UNCONFIRMED = "ORDER_UNCONFIRMED"
 ORDER_VOIDED = "ORDER_VOIDED"
 ORDER_REFUNDED = "ORDER_REFUNDED"
 DISPUTE_OPENED = "DISPUTE_OPENED"
@@ -245,12 +247,12 @@ class Ledger:
     def mandate_state(self, mandate_id: str) -> MandateState:
         """How much of a mandate is used up, according to the log.
 
-        An order counts against the budget from the moment it is created,
-        not only once captured, so two orders in flight cannot both fit
-        into the last of the budget. Voids and refunds give the money back;
+        A create request counts against the budget before contacting PayPal.
+        A definitive rejection releases the reservation. Voids and refunds give the money back;
         a voided order also gives back its slot in the order count.
         """
         amounts: dict[str, int] = {}
+        pending: dict[str, int] = {}
         voided: set[str] = set()
         refunded: dict[str, int] = {}
         refund_ids: set[str] = set()
@@ -260,7 +262,12 @@ class Ledger:
             ref = event.order_ref or f"seq-{event.seq}"
             if event.type == MANDATE_REVOKED:
                 revoked = True
+            elif event.type == ORDER_REQUESTED:
+                pending[event.payload["intent_id"]] = event.payload["amount_minor"]
+            elif event.type == ORDER_FAILED:
+                pending.pop(event.payload["intent_id"], None)
             elif event.type == ORDER_CREATED:
+                pending.pop(event.payload.get("intent_id"), None)
                 amounts[ref] = int(event.payload.get("amount_minor", 0))
             elif event.type == ORDER_CAPTURED:
                 # Capture may differ from the created amount; trust capture.
@@ -278,5 +285,6 @@ class Ledger:
         live = {ref: amount for ref, amount in amounts.items() if ref not in voided}
         committed = sum(max(amount - refunded.get(ref, 0), 0) for ref, amount in live.items())
         return MandateState(
-            committed_minor=committed, order_count=len(live), revoked=revoked
+            committed_minor=committed + sum(pending.values()),
+            order_count=len(live) + len(pending), revoked=revoked
         )

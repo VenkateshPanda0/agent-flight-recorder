@@ -15,9 +15,10 @@ Non-obvious choices, so they can be explained and challenged.
    request id deduplicates only within PayPal's retention window; ambiguous remote outcomes require reconciliation.
 5. **Approval re-runs the guard.** A human "yes" cannot override a revoked
    mandate, an expired one, or a blown cap.
-6. **Budget is reserved at order creation** and released by a local void of an uncaptured order, a completed refund or a
-   failed PayPal call (a failed call logs `ORDER_FAILED` and creates no
-   reservation).
+6. **Budget and an order slot are reserved before calling PayPal.** `ORDER_REQUESTED`
+   survives a process interruption. A definitive rejection releases the reservation.
+   An unknown outcome retains it and blocks automatic retry. A confirmed order takes
+   over the reservation until a local void or a completed refund releases the applicable limit.
 7. **Void is a ledger release, not a PayPal call.** An approved-but-unpaid
    CREATED order has no void endpoint; it lapses on PayPal's side.
 8. **The log head hash is written into each PayPal order's description**

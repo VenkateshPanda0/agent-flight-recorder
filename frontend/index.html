@@ -256,6 +256,7 @@ function showResult(r) {
   const v = el('p'); v.append(el('span', 'verdict ' + r.decision, r.decision)); box.append(v);
   const ul = el('ul', 'codes'); r.reasons.forEach(x => { const li = el('li'); li.append(el('b', '', x.code), document.createTextNode(' ' + x.message)); ul.append(li); }); box.append(ul);
   if (r.order_id) box.append(el('p', 'note', `PayPal ${r.paypal_mode} order created: ${r.order_id}`));
+  else if (r.status === 'ORDER_UNCONFIRMED') box.append(el('p', 'err', 'PayPal did not confirm the outcome. Budget and an order slot remain reserved until the order is reconciled.'));
   else if (r.status === 'DENIED') box.append(el('p', 'note', 'No PayPal order was created. PayPal was never called.'));
   if (r.status === 'PENDING_APPROVAL') {
     const b = el('button', 'primary', 'Approve as the person'); b.onclick = async () => { try { showResult(Object.assign({agent:r.agent, proposal:r.proposal, paypal_mode:state.paypal_mode}, await api('/api/demo/approve', {intent_id:r.intent_id}))); await refresh(); } catch (e) { box.append(el('p', 'err', e.message)); } };

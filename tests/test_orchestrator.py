@@ -361,3 +361,59 @@ def test_malformed_purchase_is_denied_and_evidence_still_verifies(orch, fake, si
     bundle = build_bundle(orch.ledger, signed)
     assert bundle['summary']['intents_denied'] == 1
     assert verify_bundle(bundle).ok
+
+
+@pytest.mark.parametrize('response', [PayPalError('timed out'), PayPalError('server error', 500), {}])
+def test_uncertain_order_retains_budget_and_blocks_replay(orch, monkeypatch, response):
+    from flightrecorder.evidence import build_bundle, verify_bundle
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if isinstance(response, PayPalError):
+            raise response
+        return response
+
+    monkeypatch.setattr(orch.paypal, 'create_order', create)
+    assert orch.submit(make_intent()).status == 'ORDER_UNCONFIRMED'
+    state = orch.ledger.mandate_state('m-1')
+    assert (state.committed_minor, state.order_count) == (8999, 1)
+    assert orch.submit(make_intent()).status == 'ORDER_UNCONFIRMED'
+    assert orch.submit(make_intent(rationale='another order')).status == 'DENIED'
+    assert len(calls) == 1
+    bundle = build_bundle(orch.ledger, orch._find_mandate('m-1'))
+    assert any('outcome unknown' in line for line in bundle['summary']['plain_language'])
+    assert verify_bundle(bundle).ok
+
+
+def test_completed_capture_cannot_be_sent_again(orch, fake):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    before = len(fake.calls)
+    with pytest.raises(OrchestratorError, match='already been captured'):
+        orch.capture(order)
+    assert len(fake.calls) == before
+
+
+def test_interrupted_order_request_still_reserves_budget_after_reopen(tmp_path, fake, signed, keypair, monkeypatch):
+    path = str(tmp_path / 'orders.sqlite')
+    client = PayPalClient(PayPalConfig('id', 'secret'), fake)
+    first = Orchestrator(Ledger(path), client, trusted_public_key=keypair[1], clock=lambda: T0)
+    first.grant(signed)
+
+    def interrupted(**kwargs):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(client, 'create_order', interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            first.submit(make_intent())
+    first.ledger.close()
+    reopened = Orchestrator(Ledger(path), client, trusted_public_key=keypair[1], clock=lambda: T0)
+    try:
+        assert reopened.ledger.mandate_state('m-1').committed_minor == 8999
+        assert reopened.submit(make_intent()).status == 'ORDER_UNCONFIRMED'
+        assert reopened.submit(make_intent(rationale='different purchase')).status == 'DENIED'
+        assert not fake.calls
+    finally:
+        reopened.ledger.close()

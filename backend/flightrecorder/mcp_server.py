@@ -122,6 +122,8 @@ class McpServer:
             result.update(status="NEEDS_PERSONS_APPROVAL",
                           message="This is above the approval threshold. It was NOT placed; the person must approve it. "
                                   "Tell them what you want to buy and why.")
+        elif out.status == "ORDER_UNCONFIRMED":
+            result.update(status="ORDER_UNCONFIRMED", message="PayPal's outcome is unknown. Budget remains reserved pending reconciliation.")
         elif out.status == "ORDER_FAILED":
             result.update(status="ORDER_FAILED", message="The guard allowed it but PayPal did not create the order.")
         else:

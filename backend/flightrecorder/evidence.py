@@ -38,6 +38,7 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
     mine = [e for e in events if e["mandate_id"] == m["mandate_id"]]
 
     intents: dict[str, dict] = {}
+    unconfirmed: set[str] = set()
     for e in mine:
         iid = e["payload"].get("intent_id")
         if e["type"] == L.INTENT_SUBMITTED:
@@ -61,7 +62,12 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
             intents[iid]["reason_codes"] = [r["code"] for r in v["reasons"]]
         elif iid in intents and e["type"] == L.APPROVAL_GRANTED:
             intents[iid]["approved_by"] = e["payload"].get("approver")
+        elif iid in intents and e["type"] == L.ORDER_REQUESTED:
+            unconfirmed.add(iid)
+        elif e["type"] == L.ORDER_FAILED:
+            unconfirmed.discard(iid)
         elif iid in intents and e["type"] == L.ORDER_CREATED:
+            unconfirmed.discard(iid)
             intents[iid]["order_id"] = e["order_ref"]
     by_order = {i["order_id"]: i for i in intents.values() if i["order_id"]}
     for e in mine:
@@ -93,6 +99,8 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
             state = "refunded" if r["refunded"] else "captured" if r["captured"] else \
                 "voided" if r["voided"] else "created"
             lines.append(f"PayPal order {r['order_id']} {state}: {what}{extra}.")
+        elif r["intent_id"] in unconfirmed:
+            lines.append(f"PayPal order outcome unknown: {what}. Budget and order slot remain reserved.")
         else:
             lines.append(f"No order resulted: {what} (verdict {r['verdict']}).")
     return {

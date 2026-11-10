@@ -34,7 +34,7 @@ class OrchestratorError(Exception):
 class Outcome:
     intent_id: str
     verdict: Verdict
-    status: str  # ORDER_CREATED | DENIED | PENDING_APPROVAL | ORDER_FAILED | DUPLICATE
+    status: str  # ORDER_CREATED | DENIED | PENDING_APPROVAL | ORDER_FAILED | ORDER_UNCONFIRMED | DUPLICATE
     order_id: str | None = None
     approve_url: str | None = None
 
@@ -204,8 +204,11 @@ class Orchestrator:
     def capture(self, order_id: str) -> dict:
         with self._lock:
             mandate_id = self._order_mandate(order_id)
-            if any(e.type in (L.ORDER_VOIDED, L.ORDER_REFUNDED) for e in self.ledger.events(order_ref=order_id)):
+            events = self.ledger.events(order_ref=order_id)
+            if any(e.type in (L.ORDER_VOIDED, L.ORDER_REFUNDED) for e in events):
                 raise OrchestratorError("A voided or refunded order cannot be captured.")
+            if any(e.type == L.ORDER_CAPTURED and e.payload.get("status") == "COMPLETED" for e in events):
+                raise OrchestratorError("Order has already been captured.")
             data = self.paypal.capture_order(order_id, request_id=f"capture-{order_id}")
             unit = data["purchase_units"][0]
             capture = unit["payments"]["captures"][0]
@@ -274,7 +277,14 @@ class Orchestrator:
         return digest({"intent": iid, "mandate": digest(signed.to_dict()) if signed else None})
 
     def _create_order(self, iid: str, intent: PurchaseIntent, verdict: Verdict) -> Outcome:
-        head = self.ledger.head_hash()
+        request_id = self._request_id(iid, intent)
+        amount = intent.computed_total_minor
+        # Commit before the network call so a crash cannot erase the reservation.
+        request = self.ledger.append(
+            L.ORDER_REQUESTED, {"intent_id": iid, "amount_minor": amount, "request_id": request_id},
+            mandate_id=intent.mandate_id, ts=self._clock(),
+        )
+        head = request.hash
         try:
             order = self.paypal.create_order(
                 items=[i.to_dict() for i in intent.items],
@@ -282,32 +292,38 @@ class Orchestrator:
                 mandate_id=intent.mandate_id,
                 reference_id=iid[:64],
                 description=f"AFR log head {head}"[:127],
-                request_id=self._request_id(iid, intent),
+                request_id=request_id,
             )
+            order_id = order.get("id") if isinstance(order, dict) else None
+            if not isinstance(order_id, str) or not order_id.strip():
+                raise PayPalError("PayPal response did not identify the order.")
         except PayPalError as error:
+            rejected = error.status in (400, 401, 403, 404, 422)
             self.ledger.append(
-                L.ORDER_FAILED,
+                L.ORDER_FAILED if rejected else L.ORDER_UNCONFIRMED,
                 {"intent_id": iid, "error": str(error), "status": error.status},
                 mandate_id=intent.mandate_id, ts=self._clock(),
             )
-            return Outcome(iid, verdict, "ORDER_FAILED")
+            return Outcome(iid, verdict, "ORDER_FAILED" if rejected else "ORDER_UNCONFIRMED")
+        links = order.get("links")
         approve_url = next(
-            (l["href"] for l in order.get("links", []) if l.get("rel") in ("approve", "payer-action")),
+            (link["href"] for link in links if isinstance(link, dict)
+             and link.get("rel") in ("approve", "payer-action") and isinstance(link.get("href"), str)),
             None,
-        )
+        ) if isinstance(links, list) else None
         self.ledger.append(
             L.ORDER_CREATED,
             {
                 "intent_id": iid,
-                "amount_minor": intent.computed_total_minor,
+                "amount_minor": amount,
                 "currency": intent.currency,
                 "merchant_id": intent.merchant_id,
                 "paypal_status": order.get("status"),
                 "log_head_at_creation": head,
             },
-            mandate_id=intent.mandate_id, order_ref=order["id"], ts=self._clock(),
+            mandate_id=intent.mandate_id, order_ref=order_id, ts=self._clock(),
         )
-        return Outcome(iid, verdict, "ORDER_CREATED", order["id"], approve_url)
+        return Outcome(iid, verdict, "ORDER_CREATED", order_id, approve_url)
 
     def _intent_events(self, iid: str) -> list[L.Event]:
         return [
@@ -333,6 +349,8 @@ class Orchestrator:
         created = next((e for e in events if e.type == L.ORDER_CREATED), None)
         if created:
             return Outcome(iid, verdict, "DUPLICATE", created.order_ref)
+        if events and events[-1].type in (L.ORDER_REQUESTED, L.ORDER_UNCONFIRMED):
+            return Outcome(iid, verdict, "ORDER_UNCONFIRMED")
         attempt = self._latest_attempt(events)
         if any(e.type == L.APPROVAL_DENIED for e in attempt):
             from .guard import Code, Reason
