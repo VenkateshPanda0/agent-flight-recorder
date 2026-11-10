@@ -109,7 +109,7 @@ class Orchestrator:
             earlier = self._intent_events(iid)
             if earlier and not self._failed_before_order(earlier):
                 # Replayed intent: report the earlier result, create nothing.
-                return self._existing_outcome(iid)
+                return self._existing_outcome(iid, earlier)
 
             self.ledger.append(
                 L.INTENT_SUBMITTED,
@@ -370,10 +370,7 @@ class Orchestrator:
         return Outcome(iid, verdict, "ORDER_CREATED", order_id, approve_url)
 
     def _intent_events(self, iid: str) -> list[L.Event]:
-        return [
-            e for e in self.ledger.events()
-            if e.payload.get("intent_id") == iid
-        ]
+        return self.ledger.intent_events(iid)
 
     @staticmethod
     def _failed_before_order(events: list[L.Event]) -> bool:
@@ -385,8 +382,7 @@ class Orchestrator:
         return bool(events) and events[-1].type == L.ORDER_FAILED and not any(
             e.type == L.ORDER_CREATED for e in events)
 
-    def _existing_outcome(self, iid: str) -> Outcome:
-        events = self._intent_events(iid)
+    def _existing_outcome(self, iid: str, events: list[L.Event]) -> Outcome:
         verdict_event = next((e for e in reversed(events) if e.type == L.VERDICT_ISSUED), None)
         verdict = _verdict_from_dict(verdict_event.payload["verdict"]) if verdict_event else \
             self._unknown_mandate_verdict()

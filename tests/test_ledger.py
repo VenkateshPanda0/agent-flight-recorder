@@ -138,6 +138,24 @@ def test_filters_by_mandate_and_order():
     assert [e.type for e in log.events(order_ref="O-1")] == [L.ORDER_CREATED, L.ORDER_CAPTURED]
 
 
+def test_intent_lookup_matches_existing_rows_after_reopening(tmp_path):
+    path = str(tmp_path / 'ledger.sqlite')
+    log = Ledger(path)
+    first = log.append(L.INTENT_SUBMITTED, {'intent_id': 'a'})
+    log.append(L.INTENT_SUBMITTED, {'intent_id': 'b'})
+    last = log.append(L.VERDICT_ISSUED, {'intent_id': 'a'})
+    with log._db:
+        log._db.execute('DROP INDEX IF EXISTS idx_events_intent')
+    log.close()
+    reopened = Ledger(path)
+    try:
+        assert reopened.intent_events('a') == [first, last]
+        assert reopened.intent_events('missing') == []
+        assert reopened.verify().ok
+    finally:
+        reopened.close()
+
+
 def test_ledger_persists_to_disk(tmp_path):
     path = str(tmp_path / "recorder.sqlite")
     first = Ledger(path)

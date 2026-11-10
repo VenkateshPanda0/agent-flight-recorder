@@ -81,7 +81,8 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
 
         def _app(self) -> DemoApp:
             cookie = self.headers.get("Cookie", "")
-            sid = next((p.split("=", 1)[1] for p in cookie.split("; ") if p.startswith("afr_sid=")), None)
+            sid = next((part.strip().split("=", 1)[1] for part in cookie.split(";")
+                        if part.strip().startswith("afr_sid=")), None)
             self._sid, app = sessions.get(sid)
             return app
 
@@ -112,7 +113,11 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                 self._json(413, {"error": "body too large"})
                 return None
             try:
-                data = json.loads(self.rfile.read(length) or b"{}", object_pairs_hook=unique_json_object)
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    self._json(400, {"error": "incomplete request body"})
+                    return None
+                data = json.loads(body or b"{}", object_pairs_hook=unique_json_object)
                 if not isinstance(data, dict):
                     raise ValueError
                 return data

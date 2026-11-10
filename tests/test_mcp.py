@@ -56,6 +56,29 @@ def test_tools_list_has_no_approve_tool(server):
     assert all(t["inputSchema"]["type"] == "object" for t in TOOLS)
 
 
+@pytest.mark.parametrize('arguments', [[], False, 0, ''])
+def test_mcp_rejects_empty_non_object_arguments(server, arguments):
+    reply = server.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                           'params': {'name': 'get_mandate', 'arguments': arguments}})
+    assert reply['error']['code'] == -32602
+
+
+def test_stdio_survives_duplicate_fields_and_excessive_nesting(server):
+    from io import StringIO
+    from flightrecorder.mcp_server import serve_stdio
+
+    malformed = '{"jsonrpc":"2.0","id":1,"method":"ping","method":"tools/list"}'
+    nested = '[' * 2000 + ']' * 2000
+    ping = '{"jsonrpc":"2.0","id":3,"method":"ping"}'
+    output = StringIO()
+    serve_stdio(server, StringIO('\n'.join((malformed, nested, ping))), output)
+    invalid, too_deep, valid = map(json.loads, output.getvalue().splitlines())
+    assert invalid['error']['code'] == -32700
+    # Parser depth limits vary by Python build. Either error leaves stdio usable.
+    assert too_deep['error']['code'] in (-32700, -32600)
+    assert valid == {'jsonrpc': '2.0', 'id': 3, 'result': {}}
+
+
 def test_get_mandate_reports_remaining_budget(server):
     m, err = call(server, "get_mandate")
     assert not err and m["remaining_minor"] == m["total_budget_minor"] == 25_000 and m["orders_placed"] == 0

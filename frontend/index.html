@@ -317,6 +317,7 @@ const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: r
 const jump = sel => { const n = document.querySelector(sel); if (n) n.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' }); };
 let touring = false;
 async function playTour() {
+  if ($('tour-start').disabled) return;
   touring = true; $('tour-start').disabled = true; $('tour').hidden = false;
   const say = (n, total, t) => { $('tour-step').textContent = `Step ${n} of ${total}`; $('tour-text').textContent = t; };
   const hold = async sec => { for (let i = 0; i < sec * 10 && touring; i++) await sleep(100); };
@@ -354,12 +355,13 @@ async function playTour() {
     if (!touring) return;
     say(8, T, 'Now someone edits one event directly in the database. Verification fails and points at the exact event.'); jump('[aria-labelledby=h-log]');
     await $('tamper').onclick(); await hold(2); if (touring) await $('verify').onclick(); await hold(8);
+    if (!touring) return;
     say(T, T, 'That is the whole loop. Reset and try it yourself: pick any scenario, edit an event, or download the bundle and run scripts/verify_bundle.py.'); await hold(5);
   } catch (e) { $('tour-text').textContent = 'The tour stopped: ' + e.message; }
   finally { touring = false; $('tour-start').disabled = false; }
 }
 $('tour-start').onclick = playTour;
-$('tour-stop').onclick = () => { touring = false; $('tour').hidden = true; $('tour-start').disabled = false; };
+$('tour-stop').onclick = () => { touring = false; $('tour').hidden = true; };
 (async () => { try { await detectBackend(); await refresh(); } catch (e) { console.error(e); } })();
 </script>
 </body>

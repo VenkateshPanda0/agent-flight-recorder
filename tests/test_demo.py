@@ -235,7 +235,8 @@ def test_http_reader_rejects_invalid_lengths_and_ambiguous_json():
     from flightrecorder.server import make_handler
     handler_type = make_handler(None, None, False)
     duplicate = b'{"bundle":{"bundle_version":2,"bundle_version":1}}'
-    for length, body in [('-1', b'{}'), ('abc', b'{}'), ('2', b'[]'), (str(len(duplicate)), duplicate)]:
+    for length, body in [('-1', b'{}'), ('abc', b'{}'), ('2', b'[]'), (str(len(duplicate)), duplicate),
+                         ('8', b'{}'), ('8', b'')]:
         handler = object.__new__(handler_type)
         handler.headers = {'Content-Length': length}
         handler.rfile = BytesIO(body)
@@ -243,6 +244,17 @@ def test_http_reader_rejects_invalid_lengths_and_ambiguous_json():
         handler._json = lambda status, data: responses.append(status)
         assert handler._read() is None
         assert responses == [400]
+
+
+def test_dashboard_cookie_accepts_separator_without_space(app):
+    from flightrecorder.server import Sessions, make_handler
+
+    sessions = Sessions(lambda: app, cap=1)
+    sid, _ = sessions.get(None)
+    handler = object.__new__(make_handler(sessions, None, True))
+    handler.headers = {'Cookie': f'other=value;afr_sid={sid}'}
+    assert handler._app() is app
+    assert handler._sid == sid
 
 
 def test_dashboard_witness_skips_paypal_when_local_log_is_tampered(monkeypatch):

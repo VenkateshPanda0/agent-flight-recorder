@@ -61,6 +61,10 @@ CREATE INDEX IF NOT EXISTS idx_events_mandate ON events (mandate_id);
 CREATE INDEX IF NOT EXISTS idx_events_order ON events (order_ref);
 """
 
+# The validity guard keeps corrupt payloads visible to the chain verifier without
+# letting them break index maintenance or prevent the ledger from opening.
+_INTENT_KEY = "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.intent_id') END"
+
 
 @dataclass(frozen=True)
 class Event:
@@ -130,6 +134,13 @@ class Ledger:
         self.operation_lock = self._lock
         with self._lock:
             self._db.executescript(_SCHEMA)
+            try:
+                self._db.execute("SELECT json_valid('{}')")
+            except sqlite3.OperationalError:
+                self._indexed_intents = False  # SQLite builds without JSON support.
+            else:
+                self._db.execute(f"CREATE INDEX IF NOT EXISTS idx_events_intent ON events ({_INTENT_KEY})")
+                self._indexed_intents = True
             self._db.commit()
 
     def close(self) -> None:
@@ -201,6 +212,16 @@ class Ledger:
         query += " ORDER BY seq"
         with self._lock:
             rows = self._db.execute(query, params).fetchall()
+        return [self._to_event(row) for row in rows]
+
+    def intent_events(self, intent_id: str) -> list[Event]:
+        """Return only the events for one intent, in ledger order."""
+        if not self._indexed_intents:
+            return [e for e in self.events() if e.payload.get("intent_id") == intent_id]
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT * FROM events WHERE {_INTENT_KEY} = ? ORDER BY seq", (intent_id,),
+            ).fetchall()
         return [self._to_event(row) for row in rows]
 
     def head_hash(self) -> str:

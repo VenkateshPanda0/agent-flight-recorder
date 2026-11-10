@@ -26,6 +26,7 @@ from typing import Any
 
 from .agent import CATALOGUE, to_intent
 from .demo import AGENT_ID, DemoApp
+from .canonical import unique_json_object
 from .evidence import build_bundle
 
 SERVER_INFO = {"name": "agent-flight-recorder", "version": "0.1.0"}
@@ -85,8 +86,8 @@ class McpServer:
     # -- tools ---------------------------------------------------------------
 
     def _get_mandate(self, _args: dict) -> dict:
-        state = self.app.state()
-        m, used = state["mandate"], state["mandate_state"]
+        m = self.app.signed.mandate.to_payload()
+        used = vars(self.app.ledger.mandate_state(m["mandate_id"]))
         remaining = max(m["total_budget_minor"] - used["committed_minor"], 0)
         return _text({
             "mandate_id": m["mandate_id"], "purpose": m["purpose"], "currency": m["currency"],
@@ -159,7 +160,7 @@ class McpServer:
             name = params.get("name") if isinstance(params, dict) else None
             if not isinstance(name, str):
                 return self._error(msg_id, -32602, "tool name must be a string")
-            args = (params.get("arguments") if isinstance(params, dict) else None) or {}
+            args = params.get("arguments", {})
             handler = {"get_mandate": self._get_mandate, "search_catalogue": self._search_catalogue,
                        "propose_purchase": self._propose_purchase, "get_evidence": self._get_evidence}.get(name)
             if handler is None:
@@ -188,8 +189,8 @@ def serve_stdio(server: McpServer, stdin=sys.stdin, stdout=sys.stdout) -> None:
         if not line:
             continue
         try:
-            message = json.loads(line)
-        except ValueError:
+            message = json.loads(line, object_pairs_hook=unique_json_object)
+        except (ValueError, RecursionError):
             reply = McpServer._error(None, -32700, "Parse error")
         else:
             reply = server.handle(message)

@@ -14,7 +14,7 @@ import threading
 from .agent import (CATALOGUE, LLMProposer, LocalLLMProposer, ScriptedProposer,
                     local_model_available, poisoned_catalogue, to_intent)
 from .disputes import DisputeHandler
-from .evidence import build_bundle, verify_bundle
+from .evidence import build_bundle, summarise, verify_bundle
 from .ledger import Ledger
 from .mandate import generate_keypair, new_mandate, sign_mandate, utc_now
 from .orchestrator import Orchestrator
@@ -148,7 +148,10 @@ class DemoApp:
                 raise RuntimeError("No live model is configured on this server.")
             proposer = get_live_proposer()
         catalogue = poisoned_catalogue() if name == "live" else CATALOGUE
-        with _live_lock:
+        if name == "live":
+            with _live_lock:
+                proposal = proposer.propose(REQUEST, catalogue)
+        else:
             proposal = proposer.propose(REQUEST, catalogue)
         intent = to_intent(proposal, catalogue, mandate_id=self.signed.mandate.mandate_id, agent_id=AGENT_ID)
         out = self.orch.submit(intent)
@@ -259,5 +262,5 @@ class DemoApp:
             "scenarios": {k: v[0] for k, v in SCENARIOS.items() if k != "live" or live_available()},
             "recorded_model": (recorded_runs() or {}).get("model"),
             "llm_available": live_available(),
-            "summary": build_bundle(self.ledger, self.signed)["summary"],
+            "summary": summarise(m.to_payload(), events),
         }
