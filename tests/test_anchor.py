@@ -69,13 +69,17 @@ def test_bundle_reports_anchors_and_events_after(signed, keypair, monkeypatch):
 
     plain = verify_bundle(bundle)
     assert plain.ok and plain.anchors[0]["verified"] is None and plain.events_after_last_anchor == 2
+    assert plain.events_without_verified_timestamp == len(bundle['events'])
 
     monkeypatch.setattr(A, "verify_token", lambda h, t: AnchorCheck(True, "T1", "ok"))
-    assert verify_bundle(bundle, verify_anchors=True).anchors[0]["verified"] is True
+    verified = verify_bundle(bundle, verify_anchors=True)
+    assert verified.anchors[0]["verified"] is True
+    assert verified.events_without_verified_timestamp == 3  # Includes the anchor record itself.
 
     monkeypatch.setattr(A, "verify_token", lambda h, t: AnchorCheck(False, None, "token invalid"))
     bad = verify_bundle(bundle, verify_anchors=True)
     assert not bad.ok and any("timestamp anchor" in p for p in bad.problems)
+    assert bad.events_without_verified_timestamp == len(bundle['events'])
 
 
 def test_unanchored_bundle_says_everything_is_unpinned(signed, keypair):

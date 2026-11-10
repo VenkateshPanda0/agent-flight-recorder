@@ -162,6 +162,18 @@ def test_http_reader_rejects_invalid_lengths_and_ambiguous_json():
         assert responses == [400]
 
 
+def test_dashboard_witness_skips_paypal_when_local_log_is_tampered(monkeypatch):
+    app = DemoApp(use_real_paypal=False, allow_tamper=True)
+    app.run_scenario('buy')
+    app.tamper()
+    app.paypal_mode = 'sandbox'
+    lookups = []
+    monkeypatch.setattr(app._client, 'get_order', lookups.append)
+    with pytest.raises(ValueError, match='local bundle failed verification'):
+        app.paypal_witness()
+    assert not lookups
+
+
 def test_rate_limiter_rejected_visitors_do_not_grow_memory():
     from flightrecorder.server import RateLimiter
     limiter = RateLimiter(overall=1)

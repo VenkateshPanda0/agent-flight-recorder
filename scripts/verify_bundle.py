@@ -38,8 +38,9 @@ if not check.chain_ok:
 elif check.anchors:
     for a in check.anchors:
         state = {True: "verified", False: "FAILED", None: "not checked"}[a["verified"]]
-        print(f"anchor at event #{a['seq']}: {state}, independent timestamp {a['gen_time']} ({a['tsa']})")
-    print(f"events after the last anchor (not independently pinned): {check.events_after_last_anchor}")
+        timestamp = f", verified time {a['gen_time']}" if a['verified'] is True and a['gen_time'] else ""
+        print(f"anchor at event #{a['seq']}: {state}{timestamp}")
+    print(f"events outside verified timestamp coverage: {check.events_without_verified_timestamp}")
 else:
     print("no external timestamp anchors in this bundle: removal of the newest events is undetectable without --head")
 if not args.head:
@@ -47,23 +48,28 @@ if not args.head:
 if not args.key:
     print("note: no --key given, so the signer is not checked against a trusted key")
 paypal_ok = True
-if args.paypal:
+if args.paypal and not check.ok:
+    print("PayPal witness: skipped because offline verification failed")
+elif args.paypal:
     from flightrecorder.evidence import check_paypal_witness
     from flightrecorder.paypal import PayPalClient, PayPalConfig, PayPalError
-    try:
-        client = PayPalClient(PayPalConfig.from_env())
-        rows = check_paypal_witness(bundle, client.get_order)
-    except (PayPalError, KeyError, TypeError) as exc:
-        rows = []
-        print("PayPal cross-check: could not run:", exc)
+    rows = []
+    if not any(event["type"] == "ORDER_CREATED" for event in bundle["events"]):
+        print("PayPal witness: no orders in this bundle")
+    else:
+        try:
+            client = PayPalClient(PayPalConfig.from_env())
+            rows = check_paypal_witness(bundle, client.get_order)
+        except (PayPalError, KeyError, TypeError) as exc:
+            print("PayPal cross-check: could not run:", exc)
     for r in rows:
         mark = {True: "matches", False: "DIFFERS", None: "not checked"}[r["matches_paypal"]]
         print(f"PayPal witness, order {r['order_id']} (event #{r['seq']}): {mark}. {r['detail']}")
-        paypal_ok = paypal_ok and r["matches_paypal"] is not False and r["logged_head_matches_chain"]
-    if not rows:
-        print("PayPal witness: no orders in this bundle")
+    paypal_ok = bool(rows) and all(r["matches_paypal"] is True and r["logged_head_matches_chain"] for r in rows)
 if check.ok and paypal_ok:
     print("RESULT: bundle verifies")
+elif check.ok:
+    print("RESULT: offline checks passed, but the requested PayPal witness did not verify")
 else:
     for p in check.problems:
         print("PROBLEM:", p + (f" (event #{check.first_bad_seq})" if check.first_bad_seq else ""))

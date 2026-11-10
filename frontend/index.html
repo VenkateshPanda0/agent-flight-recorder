@@ -288,7 +288,8 @@ $('dl').onclick = async () => {
 };
 $('checkcur').onclick = async () => {
   const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
-  const anchors = r.anchors && r.anchors.length ? ` ${r.anchors.length} independent timestamp(s) checked (latest ${r.anchors[r.anchors.length-1].gen_time}); ${r.events_after_last_anchor} event(s) after the last one are not pinned.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp yet: use “Anchor head hash” first.');
+  const verified = (r.anchors || []).filter(a => a.verified === true);
+  const anchors = verified.length ? ` ${verified.length} independent timestamp(s) verified. ${r.events_without_verified_timestamp} event(s) fall outside verified timestamp coverage.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp was verified.');
   status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
 };
 $('witness').onclick = async () => {
@@ -297,9 +298,9 @@ $('witness').onclick = async () => {
     const rows = await api('/api/demo/paypal-witness', {});
     if (!rows.length) { status($('evout'), true, 'No PayPal orders in this log yet.'); }
     else {
-      const bad = rows.filter(r => r.matches_paypal === false), unknown = rows.filter(r => r.matches_paypal === null);
+      const bad = rows.filter(r => r.matches_paypal === false || !r.logged_head_matches_chain), unknown = rows.filter(r => r.matches_paypal === null);
       status($('evout'), bad.length === 0 && unknown.length === 0,
-        bad.length ? `PayPal's stored log head DIFFERS from the chain for order ${bad[0].order_id}: history before it was changed.`
+        bad.length ? `The witness or local log head disagrees with the chain for order ${bad[0].order_id}.`
         : unknown.length ? `Could not read ${unknown.length} order(s) from PayPal (the sandbox deletes old unapproved orders).`
         : `PayPal holds the same log head as the chain for all ${rows.length} order(s): an independent witness agrees.`);
     }

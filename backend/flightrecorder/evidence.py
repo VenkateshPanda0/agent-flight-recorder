@@ -139,6 +139,7 @@ class BundleCheck:
     head_hash: str | None = None
     anchors: list[dict] = field(default_factory=list)
     events_after_last_anchor: int | None = None
+    events_without_verified_timestamp: int | None = None
 
     def fail(self, message: str, seq: int | None = None) -> None:
         self.ok = False
@@ -256,12 +257,15 @@ def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool)
         elif verify_anchors and ev["seq"] in checked_seqs:
             res = verify_token(p["anchored_hash"], base64.b64decode(p["token_b64"]))
             entry["verified"] = res.ok
-            entry["gen_time"] = res.gen_time or entry["gen_time"]
+            entry["gen_time"] = res.gen_time if res.ok else None
             if not res.ok:
                 check.fail(f"timestamp anchor at event #{ev['seq']}: {res.detail}", ev["seq"])
         check.anchors.append(entry)
     check.events_after_last_anchor = (
         last_seq - check.anchors[-1]["seq"] if check.anchors else last_seq)
+    # The timestamp covers the preceding hash, so its own record is outside the proof.
+    pinned_through = max((a["seq"] - 1 for a in check.anchors if a["verified"] is True), default=0)
+    check.events_without_verified_timestamp = last_seq - pinned_through
 
 
 WITNESS_PREFIX = "AFR log head "

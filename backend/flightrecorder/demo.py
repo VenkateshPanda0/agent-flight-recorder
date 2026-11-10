@@ -206,7 +206,8 @@ class DemoApp:
                           verify_anchors=True)
         return {"ok": c.ok, "problems": c.problems, "first_bad_seq": c.first_bad_seq,
                 "signature_ok": c.signature_ok, "chain_ok": c.chain_ok, "anchors": c.anchors,
-                "events_after_last_anchor": c.events_after_last_anchor}
+                "events_after_last_anchor": c.events_after_last_anchor,
+                "events_without_verified_timestamp": c.events_without_verified_timestamp}
 
     def anchor(self) -> dict:
         """Timestamp the current head hash with an independent authority."""
@@ -218,7 +219,10 @@ class DemoApp:
         from .evidence import check_paypal_witness
         if self.paypal_mode != "sandbox":
             raise ValueError("This needs the real PayPal sandbox; this server is running with a simulated PayPal.")
-        return check_paypal_witness(self.bundle(), self._client.get_order)
+        bundle = self.bundle()
+        if not verify_bundle(bundle, trusted_public_key=self.public_key).ok:
+            raise ValueError("PayPal cross-check skipped because the local bundle failed verification.")
+        return check_paypal_witness(bundle, self._client.get_order)
 
     def tamper(self) -> dict:
         """Demo only: rewrite the amount in the first ORDER_CREATED event

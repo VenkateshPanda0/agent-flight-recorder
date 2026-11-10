@@ -164,6 +164,47 @@ def test_cli_verifier_exit_codes(tmp_path, bundle, world):
     assert no.returncode == 1 and "FAILED" in no.stdout
 
 
+@pytest.mark.parametrize('mode', ['no credentials', 'unreachable', 'no orders', 'match', 'invalid bundle'])
+def test_cli_requires_requested_paypal_witness(tmp_path, bundle, world, monkeypatch, capsys, mode):
+    import runpy
+    import sys
+    from pathlib import Path
+    from flightrecorder.paypal import PayPalError
+
+    orch, signed, _ = world
+    if mode == 'no orders':
+        empty = Ledger()
+        Orchestrator(empty, orch.paypal).grant(signed)
+        bundle = build_bundle(empty, signed)
+    elif mode == 'invalid bundle':
+        bundle['head_hash'] = 'invalid'
+    path = tmp_path / 'evidence.json'
+    path.write_text(json.dumps(bundle), encoding='utf-8')
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'verify_bundle.py'
+    monkeypatch.setattr(sys, 'argv', [str(script), str(path), '--paypal'])
+    lookups = []
+
+    def config():
+        if mode == 'no credentials':
+            raise PayPalError('missing credentials')
+        return PayPalConfig('id', 'secret')
+
+    def get_order(self, order_id):
+        lookups.append(order_id)
+        if mode == 'unreachable':
+            raise PayPalError('not found', 404)
+        return _paypal_with_descriptions(orch)(order_id)
+
+    monkeypatch.setattr(PayPalConfig, 'from_env', staticmethod(config))
+    monkeypatch.setattr(PayPalClient, 'get_order', get_order)
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script))
+    assert exc.value.code == (0 if mode == 'match' else 1)
+    assert bool(lookups) == (mode in ('unreachable', 'match'))
+    output = capsys.readouterr().out
+    assert ('RESULT: bundle verifies' in output) == (mode == 'match')
+
+
 def _paypal_with_descriptions(orch):
     """A fake PayPal that stored what the orchestrator really sent."""
     sent = {}
