@@ -463,6 +463,35 @@ def test_parse_amount_rejects_malformed_decimal(value):
         parse_amount(value, 'USD')
 
 
+def test_tampered_revocation_cannot_reenable_purchase(orch, fake):
+    orch.revoke('m-1')
+    with orch.ledger._db:
+        orch.ledger._db.execute('UPDATE events SET type = ? WHERE type = ?', ('IGNORED', L.MANDATE_REVOKED))
+    with pytest.raises(OrchestratorError, match='Ledger integrity check failed'):
+        orch.submit(make_intent())
+    assert not fake.calls
+
+
+@pytest.mark.parametrize('action', ['approve', 'capture', 'refund', 'void'])
+def test_tampered_ledger_blocks_payment_and_budget_changes(orch, fake, action):
+    if action == 'approve':
+        pending = orch.submit(make_intent(items=(LineItem('Pro', 'footwear', 11000),)))
+        args = (pending.intent_id, 'person')
+    else:
+        order = orch.submit(make_intent()).order_id
+        if action == 'refund':
+            orch.capture(order)
+        args = (order,)
+    with orch.ledger._db:
+        orch.ledger._db.execute("UPDATE events SET hash = 'tampered' WHERE seq = 1")
+    before = len(fake.calls)
+    events_before = len(orch.ledger.events())
+    with pytest.raises(OrchestratorError, match='Ledger integrity check failed'):
+        getattr(orch, action)(*args)
+    assert len(fake.calls) == before
+    assert len(orch.ledger.events()) == events_before
+
+
 def test_interrupted_order_request_still_reserves_budget_after_reopen(tmp_path, fake, signed, keypair, monkeypatch):
     path = str(tmp_path / 'orders.sqlite')
     client = PayPalClient(PayPalConfig('id', 'secret'), fake)

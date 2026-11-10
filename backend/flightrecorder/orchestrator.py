@@ -75,6 +75,7 @@ class Orchestrator:
 
     def grant(self, signed: SignedMandate) -> None:
         with self._lock:
+            self._require_intact_ledger()
             if self._find_mandate(signed.mandate.mandate_id) is not None:
                 raise OrchestratorError("Mandate already granted.")
             self.ledger.append(
@@ -86,6 +87,7 @@ class Orchestrator:
 
     def revoke(self, mandate_id: str, reason: str = "") -> None:
         with self._lock:
+            self._require_intact_ledger()
             if self._find_mandate(mandate_id) is None:
                 raise OrchestratorError("Unknown mandate.")
             self.ledger.append(
@@ -105,6 +107,7 @@ class Orchestrator:
         except (TypeError, ValueError):
             return self._reject_unhashable(intent)
         with self._lock:
+            self._require_intact_ledger()
             earlier = self._intent_events(iid)
             if earlier and not self._failed_before_order(earlier):
                 # Replayed intent: report the earlier result, create nothing.
@@ -147,6 +150,7 @@ class Orchestrator:
             (Reason(Code.INVALID_LINE_ITEM, "Intent contains data that cannot be hashed, such as a float."),),
         )
         with self._lock:
+            self._require_intact_ledger()
             self.ledger.append(
                 L.INTENT_SUBMITTED,
                 {"unhashable_intent": repr(intent)[:500]},
@@ -162,6 +166,7 @@ class Orchestrator:
 
     def approve(self, intent_id: str, approver: str) -> Outcome:
         with self._lock:
+            self._require_intact_ledger()
             intent = self._pending_intent(intent_id)
             self.ledger.append(
                 L.APPROVAL_GRANTED,
@@ -190,6 +195,7 @@ class Orchestrator:
 
     def reject(self, intent_id: str, approver: str) -> None:
         with self._lock:
+            self._require_intact_ledger()
             intent = self._pending_intent(intent_id)
             self.ledger.append(
                 L.APPROVAL_DENIED,
@@ -202,6 +208,7 @@ class Orchestrator:
 
     def capture(self, order_id: str) -> dict:
         with self._lock:
+            self._require_intact_ledger()
             mandate_id = self._order_mandate(order_id)
             events = self.ledger.events(order_ref=order_id)
             if any(e.type in (L.ORDER_VOIDED, L.ORDER_REFUNDED) for e in events):
@@ -252,6 +259,7 @@ class Orchestrator:
         """Release an unpaid order. Unapproved PayPal orders simply lapse,
         so this records the release and gives the budget and slot back."""
         with self._lock:
+            self._require_intact_ledger()
             mandate_id = self._order_mandate(order_id)
             events = self.ledger.events(order_ref=order_id)
             if self._capture_unresolved(events):
@@ -265,6 +273,7 @@ class Orchestrator:
 
     def refund(self, order_id: str) -> dict:
         with self._lock:
+            self._require_intact_ledger()
             mandate_id = self._order_mandate(order_id)
             if any(e.type == L.ORDER_REFUNDED for e in self.ledger.events(order_ref=order_id)):
                 raise OrchestratorError("Order has already been refunded.")
@@ -299,6 +308,11 @@ class Orchestrator:
             return data
 
     # -- internals ---------------------------------------------------------
+
+    def _require_intact_ledger(self) -> None:
+        check = self.ledger.verify()
+        if not check.ok:
+            raise OrchestratorError(f"Ledger integrity check failed at event #{check.first_bad_seq}.")
 
     @staticmethod
     def _capture_unresolved(events: list[L.Event]) -> bool:
