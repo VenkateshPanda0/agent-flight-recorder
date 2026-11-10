@@ -257,6 +257,12 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
             check.fail("summary does not match the events")
 
     if chain_ok:
+        by_seq = {ev["seq"]: ev for ev in events}
+        for ev in events:
+            if ev["type"] == L.ORDER_CREATED and "recovered_request_seq" in ev["payload"]:
+                head = _order_witness_head(ev, by_seq)
+                if head is None or head != ev["payload"].get("log_head_at_creation"):
+                    check.fail("recovered order does not match its original request", ev["seq"])
         _check_anchors(events, check, verify_anchors)
 
 def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool) -> None:
@@ -292,11 +298,28 @@ def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool)
 WITNESS_PREFIX = "AFR log head "
 
 
+def _order_witness_head(event: dict, by_seq: dict[int, dict]) -> str | None:
+    payload = event["payload"]
+    if "recovered_request_seq" not in payload:
+        return event["prev_hash"]
+    seq = payload["recovered_request_seq"]
+    if type(seq) is not int or seq >= event["seq"]:
+        return None
+    request = by_seq.get(seq)
+    if (request is None or request["type"] != L.ORDER_REQUESTED
+            or request["mandate_id"] != event["mandate_id"]
+            or request["payload"].get("intent_id") != payload.get("intent_id")
+            or request["payload"].get("amount_minor") != payload.get("amount_minor")):
+        return None
+    return request["hash"]
+
+
 def check_paypal_witness(bundle: dict, get_order) -> list[dict]:
     """Cross-check a bundle against the copy of the log head that PayPal holds.
 
     Every order is created with the log's head hash in its description, and that
-    hash is also the ``prev_hash`` of the order's ORDER_CREATED event. PayPal is
+    hash is the preceding hash for an immediate confirmation or the earlier
+    request hash for a recovered order. PayPal is
     therefore an independent witness: someone who rewrites history and rebuilds the
     whole chain consistently still cannot change the value PayPal stored.
 
@@ -305,13 +328,14 @@ def check_paypal_witness(bundle: dict, get_order) -> list[dict]:
     PayPal's stored value agrees with the chain (``None`` if PayPal could not be asked).
     """
     rows = []
+    by_seq = {event["seq"]: event for event in bundle["events"]}
     for ev in bundle["events"]:
         if ev["type"] != "ORDER_CREATED":
             continue
         order_id = ev["order_ref"]
-        chain_head = ev["prev_hash"]
+        chain_head = _order_witness_head(ev, by_seq)
         row = {"seq": ev["seq"], "order_id": order_id, "chain_head": chain_head,
-               "logged_head_matches_chain": ev["payload"].get("log_head_at_creation") == chain_head,
+               "logged_head_matches_chain": chain_head is not None and ev["payload"].get("log_head_at_creation") == chain_head,
                "paypal_head": None, "matches_paypal": None, "detail": ""}
         try:
             description = (get_order(order_id)["purchase_units"][0].get("description") or "")

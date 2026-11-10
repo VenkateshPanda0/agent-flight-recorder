@@ -628,3 +628,58 @@ def test_interrupted_order_request_still_reserves_budget_after_reopen(tmp_path, 
         assert not fake.calls
     finally:
         reopened.ledger.close()
+
+
+def test_recover_unconfirmed_order_preserves_original_paypal_witness(orch, signed, monkeypatch):
+    from flightrecorder.evidence import build_bundle, check_paypal_witness, verify_bundle
+
+    requests = []
+    remote = {'id': 'ORD1', 'status': 'APPROVED'}
+
+    def timeout(**kwargs):
+        requests.append('POST')
+        remote['purchase_units'] = [{'description': kwargs['description'],
+                                     'reference_id': kwargs['reference_id'],
+                                     'amount': {'currency_code': 'USD', 'value': '89.99'}}]
+        raise PayPalError('timeout')
+
+    def lookup(order_id):
+        assert order_id == 'ORD1'
+        requests.append('GET')
+        return remote
+
+    monkeypatch.setattr(orch.paypal, 'create_order', timeout)
+    monkeypatch.setattr(orch.paypal, 'get_order', lookup)
+    out = orch.submit(make_intent())
+    assert out.status == 'ORDER_UNCONFIRMED'
+    before = orch.ledger.head_hash()
+    correct = remote['purchase_units'][0]['description']
+    remote['purchase_units'][0]['description'] = 'wrong checkpoint'
+    with pytest.raises(OrchestratorError, match='does not match'):
+        orch.reconcile_order(out.intent_id, 'ORD1')
+    assert orch.ledger.head_hash() == before
+    remote['purchase_units'][0]['description'] = correct
+    remote['status'] = 'COMPLETED'
+    with pytest.raises(OrchestratorError, match='unpaid'):
+        orch.reconcile_order(out.intent_id, 'ORD1')
+    remote['status'] = 'APPROVED'
+    recovered = orch.reconcile_order(out.intent_id, 'ORD1')
+    assert recovered.status == 'ORDER_CREATED' and recovered.order_id == 'ORD1'
+    assert orch.reconcile_order(out.intent_id, 'ORD1').status == 'DUPLICATE'
+    assert orch.submit(make_intent()).order_id == 'ORD1'
+    assert requests == ['POST', 'GET', 'GET', 'GET']
+    state = orch.ledger.mandate_state('m-1')
+    assert (state.committed_minor, state.order_count) == (8999, 1)
+    bundle = build_bundle(orch.ledger, signed)
+    assert verify_bundle(bundle).ok
+    witness, = check_paypal_witness(bundle, lookup)
+    assert witness['logged_head_matches_chain'] and witness['matches_paypal'] is True
+    assert witness['chain_head'] == correct.removeprefix('AFR log head ')
+    assert witness['chain_head'] != before
+    # Even a self-consistent rehash cannot point recovery at the wrong request.
+    event = bundle['events'][-1]
+    event['payload']['recovered_request_seq'] = 1
+    event['hash'] = L.compute_event_hash(event['seq'], event['ts'], event['type'], event['mandate_id'],
+                                         event['order_ref'], event['payload'], event['prev_hash'])
+    bundle['head_hash'] = event['hash']
+    assert any('original request' in p for p in verify_bundle(bundle).problems)

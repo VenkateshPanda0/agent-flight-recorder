@@ -16,7 +16,9 @@ Non-obvious choices, so they can be explained and challenged.
    intent. Re-submitting returns the earlier result and creates no second
    order. A hash of this id and the signed mandate is sent as `PayPal-Request-Id`. If the earlier attempt
    failed at PayPal (`ORDER_FAILED`), the same intent may be retried; the shared
-   request id deduplicates only within PayPal's retention window; ambiguous remote outcomes require reconciliation.
+   request id deduplicates only within PayPal's retention window. An unconfirmed request can be
+   reconciled through a read-only lookup of an unpaid order. Its reference, amount, currency,
+   and witness head must match the original request.
 5. **Approval re-runs the guard.** A human "yes" cannot override a revoked
    mandate, an expired one, or a blown cap.
 6. **Budget and an order slot are reserved before calling PayPal.** `ORDER_REQUESTED`
@@ -69,10 +71,11 @@ Non-obvious choices, so they can be explained and challenged.
     login, so the sandbox client credentials do not work against it. Rather than depend on it, the project ships its
     own MCP server that wraps the guard: agents get four tools, and the only way to move money is `propose_purchase`.
     There is intentionally no approval tool, so an agent can never approve itself.
-18. **PayPal as a witness.** The log head hash is already written into each order's description, and equals the
-    `prev_hash` of the order's ORDER_CREATED event. Fetching the order back therefore gives an independent copy of the
-    chain's state that an attacker cannot rewrite along with the database. Verified against the real sandbox, with a
-    test where the whole chain is rebuilt consistently and only PayPal's copy exposes it.
+18. **PayPal as a witness.** The log head written into the order description equals the
+    preceding hash for an immediate confirmation. Recovery records the original request's
+    sequence so the verifier can resolve the earlier hash. Fetching an order gives an
+    independent copy of the chain's state at the time of its request. The original witness
+    flow was verified against the real sandbox. Order recovery is tested with fake responses.
 19. **`PayPal-Request-Id` includes the mandate.** It used to be the intent id alone, so two demo sessions buying the same
     thing (same fixed demo mandate id) shared a request id and PayPal returned the first session's order, with its stale
     log head. Found by running the witness check against the real sandbox. The id is now a hash of the intent and the

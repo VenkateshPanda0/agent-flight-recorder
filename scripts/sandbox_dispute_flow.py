@@ -2,6 +2,7 @@
 
 Route A (the realistic one): the buyer opens the dispute in the sandbox UI.
   python scripts/sandbox_dispute_flow.py start             # creates a guarded order, prints approve link
+  python scripts/sandbox_dispute_flow.py reconcile-order ORDER-ID # recover an unpaid order after an uncertain create
   (open the link, log in as a SANDBOX buyer, approve)
   python scripts/sandbox_dispute_flow.py capture           # captures the payment, prints the transaction id
   python scripts/sandbox_dispute_flow.py reconcile-capture # read-only lookup after a timeout or pending capture
@@ -28,7 +29,7 @@ from flightrecorder.disputes import DisputeHandler
 from flightrecorder.guard import LineItem, PurchaseIntent
 from flightrecorder.ledger import Ledger
 from flightrecorder.mandate import SignedMandate, generate_keypair, new_mandate, sign_mandate, utc_now
-from flightrecorder.orchestrator import Orchestrator, OrchestratorError
+from flightrecorder.orchestrator import Orchestrator, OrchestratorError, intent_id_of
 from flightrecorder.paypal import PayPalClient, PayPalConfig, PayPalError
 
 STATE = ROOT / ".afr_flow.json"
@@ -54,15 +55,40 @@ def start():
     orch = Orchestrator(ledger, client, trusted_public_key=pub)
     orch.grant(signed)
     item = LineItem("Trail runner", "footwear", 8_999, 1)
-    out = orch.submit(PurchaseIntent(mandate.mandate_id, "agent-shopper", "shoes.example", "USD",
-                                     (item,), 8_999, "Cheapest in-stock pair."))
+    intent = PurchaseIntent(mandate.mandate_id, "agent-shopper", "shoes.example", "USD",
+                            (item,), 8_999, "Cheapest in-stock pair.")
+    state = {"signed": signed.to_dict(), "intent_id": intent_id_of(intent)}
+    STATE.write_text(json.dumps(state), encoding="utf-8")
+    out = orch.submit(intent)
+    if out.status == "ORDER_UNCONFIRMED":
+        raise SystemExit("Order outcome unknown. Find the unpaid order ID in the sandbox and run reconcile-order ORDER-ID.")
     if not out.order_id:
         raise SystemExit(f"order not created: {out.status}")
-    STATE.write_text(json.dumps({"signed": signed.to_dict(), "order_id": out.order_id}))
+    STATE.write_text(json.dumps({**state, "order_id": out.order_id}), encoding="utf-8")
     print("Order created:", out.order_id)
     print("1) Open this link, log in as a SANDBOX BUYER account, and approve the payment:")
     print("  ", out.approve_url)
     print("2) Then run:  python scripts/sandbox_dispute_flow.py finish")
+
+
+def reconcile_order(order_id: str):
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    if not state.get("intent_id"):
+        raise SystemExit("The saved flow has no intent ID for order reconciliation.")
+    client, ledger = build()
+    try:
+        signed = SignedMandate.from_dict(state["signed"])
+        result = Orchestrator(ledger, client, trusted_public_key=signed.public_key).reconcile_order(
+            state["intent_id"], order_id,
+        )
+    except (OrchestratorError, PayPalError) as exc:
+        raise SystemExit(f"Order could not be reconciled: {exc}") from None
+    finally:
+        ledger.close()
+    STATE.write_text(json.dumps({**state, "order_id": result.order_id}), encoding="utf-8")
+    print("Recovered PayPal order:", result.order_id)
+    if result.approve_url:
+        print("Sandbox buyer approval:", result.approve_url)
 
 
 def capture():
@@ -190,6 +216,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "evidence" and len(sys.argv) == 3:
         evidence(sys.argv[2])
+    elif cmd == "reconcile-order" and len(sys.argv) == 3:
+        reconcile_order(sys.argv[2])
     elif cmd == "reconcile-refund" and len(sys.argv) in (2, 3):
         reconcile_refund(sys.argv[2] if len(sys.argv) == 3 else None)
     else:

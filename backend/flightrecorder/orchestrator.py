@@ -207,6 +207,43 @@ class Orchestrator:
 
     # -- order lifecycle ---------------------------------------------------
 
+    def reconcile_order(self, intent_id: str, order_id: str) -> Outcome:
+        """Attach an existing unpaid sandbox order to its reserved request using GET."""
+        with self._lock:
+            self._require_intact_ledger()
+            events = self._intent_events(intent_id)
+            current = self._existing_outcome(intent_id, events)
+            if current.order_id == order_id:
+                return current
+            if current.status != "ORDER_UNCONFIRMED":
+                raise OrchestratorError("This intent has no unconfirmed order to reconcile.")
+            if self.ledger.events(order_ref=order_id, event_types=(L.ORDER_CREATED,)):
+                raise OrchestratorError("PayPal order is already linked to a different intent.")
+            attempt = self._latest_attempt(events)
+            request = next(e for e in attempt if e.type == L.ORDER_REQUESTED)
+            intent = intent_from_dict(attempt[0].payload["intent"])
+            order = self.paypal.get_order(order_id)
+            if not isinstance(order, dict) or order.get("status") not in ("CREATED", "APPROVED", "PAYER_ACTION_REQUIRED"):
+                raise OrchestratorError("Order recovery requires an unpaid PayPal order. Budget remains reserved.")
+            try:
+                unit, = order["purchase_units"]
+                amount = unit["amount"]
+                if (order.get("id") != order_id or unit.get("reference_id") != intent_id
+                        or unit.get("description") != f"AFR log head {request.hash}"
+                        or (unit.get("payments") or {}).get("captures")
+                        or amount["currency_code"] != intent.currency
+                        or parse_amount(amount["value"], intent.currency) != request.payload["amount_minor"]):
+                    raise ValueError
+            except (AttributeError, KeyError, TypeError, ValueError, PayPalError):
+                raise OrchestratorError("PayPal order does not match the recorded request. Budget remains reserved.") from None
+            self.ledger.append(L.ORDER_CREATED, {
+                "intent_id": intent_id, "amount_minor": request.payload["amount_minor"],
+                "currency": intent.currency, "merchant_id": intent.merchant_id,
+                "paypal_status": order["status"], "log_head_at_creation": request.hash,
+                "recovered_request_seq": request.seq,
+            }, mandate_id=intent.mandate_id, order_ref=order_id, ts=self._clock())
+            return Outcome(intent_id, current.verdict, "ORDER_CREATED", order_id, self._approval_link(order))
+
     def capture(self, order_id: str) -> dict:
         with self._lock:
             self._require_intact_ledger()
@@ -445,12 +482,6 @@ class Orchestrator:
                 mandate_id=intent.mandate_id, ts=self._clock(),
             )
             return Outcome(iid, verdict, "ORDER_FAILED" if rejected else "ORDER_UNCONFIRMED")
-        links = order.get("links")
-        approve_url = next(
-            (link["href"] for link in links if isinstance(link, dict)
-             and link.get("rel") in ("approve", "payer-action") and isinstance(link.get("href"), str)),
-            None,
-        ) if isinstance(links, list) else None
         self.ledger.append(
             L.ORDER_CREATED,
             {
@@ -463,7 +494,15 @@ class Orchestrator:
             },
             mandate_id=intent.mandate_id, order_ref=order_id, ts=self._clock(),
         )
-        return Outcome(iid, verdict, "ORDER_CREATED", order_id, approve_url)
+        return Outcome(iid, verdict, "ORDER_CREATED", order_id, self._approval_link(order))
+
+    @staticmethod
+    def _approval_link(order: dict) -> str | None:
+        links = order.get("links")
+        if not isinstance(links, list):
+            return None
+        return next((link["href"] for link in links if isinstance(link, dict)
+                     and link.get("rel") in ("approve", "payer-action") and isinstance(link.get("href"), str)), None)
 
     def _intent_events(self, iid: str) -> list[L.Event]:
         return self.ledger.intent_events(iid)
