@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from . import ledger as L
 from .canonical import digest
 from .guard import (
+    Code,
     Decision,
     LineItem,
     PurchaseIntent,
@@ -23,7 +24,7 @@ from .guard import (
     evaluate,
 )
 from .ledger import Ledger
-from .mandate import SignedMandate, utc_now
+from .mandate import SignedMandate, from_iso, utc_now, verify_mandate
 from .paypal import PayPalClient, PayPalError, parse_amount
 
 
@@ -255,9 +256,15 @@ class Orchestrator:
                 raise OrchestratorError("Order has already been captured.")
             if self._capture_unresolved(events):
                 raise OrchestratorError("The previous capture must be reconciled before retrying.")
+            now = self._clock()
+            blocked = self._capture_authorization_failure(mandate_id, now)
+            if blocked:
+                self.ledger.append(L.CAPTURE_BLOCKED, {"reason_code": blocked.value},
+                                   mandate_id=mandate_id, order_ref=order_id, ts=now)
+                raise OrchestratorError(f"Capture blocked: {blocked.value.lower().replace('_', ' ')}.")
             request_id = f"capture-{order_id}"
             self.ledger.append(L.CAPTURE_REQUESTED, {"request_id": request_id},
-                               mandate_id=mandate_id, order_ref=order_id, ts=self._clock())
+                               mandate_id=mandate_id, order_ref=order_id, ts=now)
             try:
                 data = self.paypal.capture_order(order_id, request_id=request_id)
             except PayPalError as error:
@@ -412,6 +419,22 @@ class Orchestrator:
         return {"amount_minor": amount, "currency": currency, "refund_id": refund_id}
 
     # -- internals ---------------------------------------------------------
+
+    def _capture_authorization_failure(self, mandate_id: str, now: datetime) -> Code | None:
+        # The order already reserves its budget and slot. Only recheck whether its
+        # signed authority is still active before sending a capture request.
+        signed = self._find_mandate(mandate_id)
+        if signed is None:
+            return Code.MANDATE_MISMATCH
+        if not verify_mandate(signed, self.trusted_public_key):
+            return Code.SIGNATURE_INVALID
+        if self.ledger.events(mandate_id=mandate_id, event_types=(L.MANDATE_REVOKED,)):
+            return Code.MANDATE_REVOKED
+        if now < from_iso(signed.mandate.created_at):
+            return Code.MANDATE_NOT_YET_VALID
+        if now >= from_iso(signed.mandate.expires_at):
+            return Code.MANDATE_EXPIRED
+        return None
 
     def _require_intact_ledger(self) -> None:
         check = self.ledger.verify()

@@ -452,6 +452,30 @@ def test_completed_capture_cannot_be_sent_again(orch, fake):
     assert len(fake.calls) == before
 
 
+@pytest.mark.parametrize('condition, reason', [('revoked', 'MANDATE_REVOKED'), ('expired', 'MANDATE_EXPIRED')])
+def test_capture_rechecks_mandate_before_sending_payment(orch, fake, signed, condition, reason):
+    from datetime import timedelta
+    from flightrecorder.evidence import build_bundle, verify_bundle
+
+    order = orch.submit(make_intent()).order_id
+    if condition == 'revoked':
+        orch.revoke('m-1')
+    else:
+        orch._clock = lambda: T0 + timedelta(hours=24)
+    before = len(fake.calls)
+    with pytest.raises(OrchestratorError, match=condition):
+        orch.capture(order)
+    assert len(fake.calls) == before
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+    blocked = orch.ledger.events(order_ref=order)[-1]
+    assert blocked.type == L.CAPTURE_BLOCKED
+    assert blocked.payload['reason_code'] == reason
+    assert orch.ledger.verify().ok
+    bundle = build_bundle(orch.ledger, signed)
+    assert any(f'capture blocked ({reason})' in line for line in bundle['summary']['plain_language'])
+    assert verify_bundle(bundle).ok
+
+
 @pytest.mark.parametrize('response', [PayPalError('timeout'), {}])
 def test_unconfirmed_capture_blocks_void_and_capture_replay(orch, monkeypatch, response):
     order = orch.submit(make_intent()).order_id
@@ -575,6 +599,7 @@ def test_capture_reconciliation_recovers_timeout_without_second_capture(orch, fa
         orch.reconcile_capture(order)
     assert orch.ledger.head_hash() == before
     state['id'] = 'CAP1'
+    orch.revoke('m-1')  # Recording an earlier remote result is still allowed.
     completed = orch.reconcile_capture(order)
     assert completed['status'] == 'COMPLETED'
     assert orch.reconcile_capture(order) == completed

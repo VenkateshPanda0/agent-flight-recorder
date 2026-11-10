@@ -26,10 +26,12 @@ Non-obvious choices, so they can be explained and challenged.
    survives a process interruption. A definitive rejection releases the reservation.
    An unknown outcome retains it and blocks automatic retry. A confirmed order takes
    over the reservation until a local void or a completed refund releases the applicable limit.
-   Capture attempts are logged before sending. Pending or uncertain captures block void and
+   A new capture requires an active signed mandate. A denial is recorded with a reason code
+   before any capture call. Capture attempts are logged before sending. Pending or uncertain captures block void and
    repeat capture until reconciled. Refunds release budget only after PayPal confirms the
    requested amount and currency and supplies a refund ID.
-   A recorded capture attempt can be reconciled with a read-only lookup of its order.
+   A recorded capture attempt can be reconciled with a read-only lookup of its order even
+   after the mandate expires or is revoked.
    Missing or mismatched capture details leave the reservation in place.
    A refund attempt is also recorded before sending and cannot be resent automatically.
    The read-only refund lookup can settle it when the ID, amount, and currency match.

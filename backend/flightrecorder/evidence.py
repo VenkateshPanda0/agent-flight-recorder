@@ -90,6 +90,8 @@ def summarise(mandate_payload: dict, events: list[dict], *, version: int = BUNDL
             capture_states[ref] = "capture unconfirmed"
         elif order and version >= 2 and e["type"] == L.CAPTURE_REJECTED:
             capture_states[ref] = "capture rejected"
+        elif order and version >= 2 and e["type"] == L.CAPTURE_BLOCKED:
+            capture_states[ref] = f"capture blocked ({e['payload']['reason_code']})"
         elif order and e["type"] == L.ORDER_CAPTURED:
             status = e["payload"].get("status")
             order["captured"] = order["captured"] or version == 1 or status == "COMPLETED"
