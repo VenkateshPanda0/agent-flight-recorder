@@ -14,7 +14,7 @@ from typing import Callable
 from . import ledger as L
 from .anchor import AnchorError
 from .canonical import digest
-from .evidence import build_bundle
+from .evidence import build_bundle, verify_bundle
 from .ledger import Ledger
 from .mandate import SignedMandate, utc_now
 from .paypal import PayPalClient
@@ -77,6 +77,8 @@ class DisputeHandler:
         except AnchorError:
             pass
         bundle = build_bundle(self.ledger, signed)
+        if not verify_bundle(bundle).ok:
+            raise DisputeError("Dispute evidence failed verification before submission.")
         content = json.dumps(bundle, sort_keys=True).encode()
         bundle_digest = digest(bundle)
         notes = self._notes(bundle, bundle_digest, info["order_ref"], anchor_note)

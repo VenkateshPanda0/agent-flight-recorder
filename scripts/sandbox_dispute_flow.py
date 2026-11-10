@@ -80,6 +80,12 @@ def capture():
     print("Then run:  python scripts/sandbox_dispute_flow.py evidence <dispute id, like PP-D-12345>")
 
 
+def save_submitted_bundle(result: dict) -> None:
+    out = ROOT / f".afr_bundle_{result['bundle_digest']}.json"
+    out.write_text(json.dumps(result["bundle"], indent=1), encoding="utf-8")
+    print("Full bundle saved (git-ignored):", out.name)
+
+
 def evidence(dispute_id: str):
     """Link a dispute the buyer opened in the sandbox UI to our order, then answer it with the evidence."""
     st = json.loads(STATE.read_text())
@@ -95,9 +101,7 @@ def evidence(dispute_id: str):
         print("require-evidence skipped:", e.status, e)
     res = handler.submit_evidence(dispute_id, signed)
     print("Evidence submitted as notes. Bundle digest:", res["bundle_digest"])
-    out = ROOT / f".afr_bundle_{dispute_id}.json"
-    out.write_text(json.dumps(res["bundle"], indent=1))
-    print("Full bundle saved (git-ignored):", out.name)
+    save_submitted_bundle(res)
     print("Dispute status now:", client.get_dispute(dispute_id).get("status"))
 
 
@@ -129,6 +133,7 @@ def finish():
         print("require-evidence skipped:", e.status, e)
     res = DisputeHandler(ledger, client).submit_evidence(dispute_id, signed)
     print("Evidence submitted. Bundle digest:", res["bundle_digest"])
+    save_submitted_bundle(res)
     print("Dispute status now:", client.get_dispute(dispute_id).get("status"))
 
 

@@ -62,6 +62,39 @@ def test_notes_are_capped(setup):
     assert len(notes) <= NOTES_LIMIT
 
 
+@pytest.mark.parametrize('corruption', ['ledger', 'signature'])
+def test_dispute_does_not_submit_invalid_evidence(setup, corruption):
+    from dataclasses import replace
+
+    orch, handler, fake, signed = setup
+    if corruption == 'ledger':
+        with orch.ledger._db:
+            orch.ledger._db.execute("UPDATE events SET hash = 'tampered' WHERE seq = 1")
+    else:
+        signed = replace(signed, signature='00' * 64)
+    with pytest.raises(DisputeError, match='failed verification'):
+        handler.submit_evidence('PP-D-1', signed)
+    assert fake.evidence is None
+    assert not any(e.type == L.EVIDENCE_SUBMITTED for e in orch.ledger.events())
+
+
+def test_sandbox_cli_saves_bundle_under_submitted_digest(setup, tmp_path, monkeypatch):
+    import runpy
+    from pathlib import Path
+    from flightrecorder.canonical import digest
+
+    _, handler, fake, signed = setup
+    result = handler.submit_evidence('PP-D-1', signed)
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'sandbox_dispute_flow.py'
+    save = runpy.run_path(str(script))['save_submitted_bundle']
+    monkeypatch.setitem(save.__globals__, 'ROOT', tmp_path)
+    save(result)
+    saved, = tmp_path.glob('.afr_bundle_*.json')
+    assert saved.name == f'.afr_bundle_{result["bundle_digest"]}.json'
+    assert digest(json.loads(saved.read_text(encoding='utf-8'))) == result['bundle_digest']
+    assert result['bundle_digest'] in fake.evidence.decode()
+
+
 def test_unmatched_dispute_rejected(setup):
     orch, _, fake, signed = setup
     fake_other = DisputePayPal()

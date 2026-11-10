@@ -15,6 +15,7 @@ from collections import OrderedDict
 from .demo import SCENARIOS, DemoApp, make_shared_client
 from .anchor import AnchorError
 from .canonical import unique_json_object
+from .disputes import DisputeError
 from .orchestrator import OrchestratorError
 from .paypal import PayPalError
 from .webhooks import WebhookProcessor
@@ -183,7 +184,7 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                     res = app.disputes.submit_evidence(dispute_id, app.signed)
                     return self._json(200, {"bundle_digest": res["bundle_digest"]})
                 return self._json(404, {"error": "not found"})
-            except (OrchestratorError, AnchorError, PayPalError, KeyError, ValueError, RuntimeError, PermissionError) as exc:
+            except (OrchestratorError, AnchorError, DisputeError, PayPalError, KeyError, ValueError, RuntimeError, PermissionError) as exc:
                 return self._json(400, {"error": str(exc)[:300]})
             except Exception:  # never leak internals
                 return self._json(500, {"error": "internal error"})
