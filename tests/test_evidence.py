@@ -72,6 +72,47 @@ def test_summary_says_allowed_and_happened(bundle):
     assert bundle["summary"]["intents_denied"] == 1
 
 
+def test_pending_capture_is_distinct_from_completed_in_exported_evidence(world, monkeypatch):
+    from flightrecorder import ledger as L
+
+    orch, signed, _ = world
+    # Use a fresh order because the fixture's first order is already completed.
+    ledger = Ledger()
+    current = Orchestrator(ledger, orch.paypal, clock=lambda: T0)
+    current.grant(signed)
+    order_id = current.submit(make_intent()).order_id
+    payment = {'id': 'CAP2', 'status': 'PENDING', 'amount': {'currency_code': 'USD', 'value': '89.99'}}
+    monkeypatch.setattr(current.paypal, 'capture_order', lambda *a, **kw: {
+        'purchase_units': [{'payments': {'captures': [payment]}}],
+    })
+    current.capture(order_id)
+    bundle = build_bundle(ledger, signed)
+    assert bundle['summary']['intents'][0]['captured'] is False
+    assert any('capture pending' in line for line in bundle['summary']['plain_language'])
+    assert verify_bundle(bundle).ok
+    ledger.append(L.ORDER_CAPTURED, {'amount_minor': 8999, 'currency': 'USD',
+                                     'capture_id': 'CAP2', 'status': 'COMPLETED'},
+                  mandate_id=signed.mandate.mandate_id, order_ref=order_id)
+    assert build_bundle(ledger, signed)['summary']['intents'][0]['captured'] is True
+
+
+def test_evidence_formats_zero_decimal_currency_and_keeps_legacy_bundles_verifiable(signed, keypair):
+    from dataclasses import replace
+    from flightrecorder.evidence import summarise
+    from flightrecorder.mandate import sign_mandate
+
+    signed = sign_mandate(replace(signed.mandate, currency='JPY'), keypair[0])
+    ledger = Ledger()
+    Orchestrator(ledger, PayPalClient(PayPalConfig('id', 'fixture'), FakePayPal())).grant(signed)
+    bundle = build_bundle(ledger, signed)
+    assert f'{signed.mandate.total_budget_minor} JPY' in bundle['summary']['plain_language'][0]
+    assert verify_bundle(bundle).ok
+    bundle['bundle_version'] = 1
+    bundle['summary'] = summarise(signed.mandate.to_payload(), bundle['events'], version=1)
+    assert f'{signed.mandate.total_budget_minor // 100}.00 JPY' in bundle['summary']['plain_language'][0]
+    assert verify_bundle(bundle).ok
+
+
 def _tamper(bundle, fn):
     b = copy.deepcopy(bundle)
     fn(b)

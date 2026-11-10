@@ -60,6 +60,8 @@ if checkpoint and isinstance(bundle, dict) and bundle.get("mandate_id") != check
 print("signature:", "valid" if check.signature_ok else "INVALID")
 print("hash chain:", "intact" if check.chain_ok else "BROKEN")
 print("head hash:", check.head_hash)
+if check.ok and bundle["bundle_version"] == 1:
+    print("note: version 1 summaries use legacy payment-status and amount labels. Consult the events for details.")
 if not check.chain_ok:
     print("timestamp anchors: not checked, because the hash chain is broken")
 elif check.anchors:

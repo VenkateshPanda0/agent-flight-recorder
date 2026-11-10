@@ -22,19 +22,28 @@ from . import ledger as L
 from .canonical import canonical_json, digest
 from .ledger import GENESIS_HASH, Ledger, compute_event_hash
 from .mandate import SignedMandate, verify_mandate
+from .paypal import PayPalError, format_amount
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 2
 MAX_ANCHORS_VERIFIED = 3
 BUNDLE_FIELDS = {"bundle_version", "mandate_id", "signed_mandate", "mandate_digest",
                  "events", "head_hash", "summary"}
 EVENT_FIELDS = {"seq", "ts", "type", "mandate_id", "order_ref", "payload", "prev_hash", "hash"}
 
 
-def _money(minor: int, currency: str) -> str:
-    return f"{minor // 100}.{minor % 100:02d} {currency}"
+def _money(minor: int, currency: str, version: int) -> str:
+    if version == 1:
+        return f"{minor // 100}.{minor % 100:02d} {currency}"
+    if isinstance(currency, str):
+        try:
+            sign = "-" if minor < 0 else ""
+            return f"{sign}{format_amount(abs(minor), currency)} {currency}"
+        except PayPalError:
+            pass
+    return f"{minor} minor units ({currency})"
 
 
-def summarise(mandate_payload: dict, events: list[dict]) -> dict:
+def summarise(mandate_payload: dict, events: list[dict], *, version: int = BUNDLE_VERSION) -> dict:
     """Derive the allowed-vs-happened summary purely from the events."""
     m = mandate_payload
     cur = m["currency"]
@@ -73,10 +82,18 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
             unconfirmed.discard(iid)
             intents[iid]["order_id"] = e["order_ref"]
     by_order = {i["order_id"]: i for i in intents.values() if i["order_id"]}
+    capture_states: dict[str, str] = {}
     for e in mine:
-        order = by_order.get(e["order_ref"])
-        if order and e["type"] == L.ORDER_CAPTURED:
-            order["captured"] = True
+        ref = e["order_ref"]
+        order = by_order.get(ref)
+        if order and version >= 2 and e["type"] == L.CAPTURE_REQUESTED:
+            capture_states[ref] = "capture unconfirmed"
+        elif order and version >= 2 and e["type"] == L.CAPTURE_REJECTED:
+            capture_states[ref] = "capture rejected"
+        elif order and e["type"] == L.ORDER_CAPTURED:
+            status = e["payload"].get("status")
+            order["captured"] = order["captured"] or version == 1 or status == "COMPLETED"
+            capture_states[ref] = "capture pending" if status == "PENDING" else "capture unconfirmed"
         elif order and e["type"] == L.ORDER_REFUNDED:
             order["refunded"] = True
         elif order and e["type"] == L.ORDER_VOIDED:
@@ -86,21 +103,21 @@ def summarise(mandate_payload: dict, events: list[dict]) -> dict:
     lines = [
         f"Mandate {m['mandate_id']}: agent '{m['agent_id']}' was authorised by "
         f"'{m['principal_id']}' ({m['purpose']!r}) to spend up to "
-        f"{_money(m['total_budget_minor'], cur)} in total, at most "
-        f"{_money(m['per_order_cap_minor'], cur)} per order, across at most "
+        f"{_money(m['total_budget_minor'], cur, version)} in total, at most "
+        f"{_money(m['per_order_cap_minor'], cur, version)} per order, across at most "
         f"{m['max_orders']} order(s), at {', '.join(m['allowed_merchants'])} only, "
         f"in categories {', '.join(m['allowed_categories'])}, "
         f"valid {m['created_at']} to {m['expires_at']}."
     ]
     for r in rows:
-        amount = "invalid amount" if r["amount_minor"] is None else _money(r["amount_minor"], r["currency"])
+        amount = "invalid amount" if r["amount_minor"] is None else _money(r["amount_minor"], r["currency"], version)
         what = f"{amount} at {r['merchant']}"
         if r["verdict"] == "DENY":
             lines.append(f"Refused before any PayPal order existed: {what} ({', '.join(r['reason_codes'])}).")
         elif r["order_id"]:
             extra = f", approved by {r['approved_by']}" if r["approved_by"] else ""
             state = "refunded" if r["refunded"] else "captured" if r["captured"] else \
-                "voided" if r["voided"] else "created"
+                "voided" if r["voided"] else capture_states.get(r["order_id"], "created")
             lines.append(f"PayPal order {r['order_id']} {state}: {what}{extra}.")
         elif r["intent_id"] in unconfirmed:
             lines.append(f"PayPal order outcome unknown: {what}. Budget and order slot remain reserved.")
@@ -172,8 +189,10 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
     if not isinstance(bundle, dict) or bundle.keys() != BUNDLE_FIELDS:
         check.fail("bundle fields do not match the evidence format")
         return
-    if type(bundle["bundle_version"]) is not int or bundle["bundle_version"] != BUNDLE_VERSION:
+    version = bundle["bundle_version"]
+    if type(version) is not int or version not in (1, BUNDLE_VERSION):
         check.fail("unsupported bundle version")
+        return
     signed = SignedMandate.from_dict(bundle["signed_mandate"])
     mandate_id = signed.mandate.mandate_id
 
@@ -232,8 +251,10 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
         check.fail("mandate in the log differs from the signed mandate in the bundle",
                    granted[0]["seq"])
 
-    if chain_ok and canonical_json(bundle["summary"]) != canonical_json(summarise(signed.mandate.to_payload(), events)):
-        check.fail("summary does not match the events")
+    if chain_ok:
+        summary = summarise(signed.mandate.to_payload(), events, version=version)
+        if canonical_json(bundle["summary"]) != canonical_json(summary):
+            check.fail("summary does not match the events")
 
     if chain_ok:
         _check_anchors(events, check, verify_anchors)
