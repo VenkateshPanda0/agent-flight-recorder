@@ -164,6 +164,45 @@ def test_cli_verifier_exit_codes(tmp_path, bundle, world):
     assert no.returncode == 1 and "FAILED" in no.stdout
 
 
+def test_cli_checkpoint_distinguishes_verified_snapshot_from_valid_prefix(tmp_path, bundle, world):
+    import subprocess
+    import sys
+    from pathlib import Path
+    from flightrecorder.evidence import summarise
+
+    _, signed, key = world
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'verify_bundle.py'
+    checkpoint = tmp_path / 'checkpoint.json'
+    data = {'checkpoint_version': 1, 'mandate_id': bundle['mandate_id'],
+            'head_hash': bundle['head_hash'], 'public_key': key}
+    checkpoint.write_text(json.dumps(data), encoding='utf-8')
+    evidence = tmp_path / 'evidence.json'
+
+    def run(snapshot, *options):
+        evidence.write_text(json.dumps(snapshot), encoding='utf-8')
+        return subprocess.run([sys.executable, str(script), str(evidence), *options],
+                              capture_output=True, text=True, timeout=10)
+
+    options = ('--checkpoint', str(checkpoint))
+    result = run(bundle, *options)
+    assert result.returncode == 0 and 'checkpoint: matched' in result.stdout
+    shortened = copy.deepcopy(bundle)
+    shortened['events'].pop()
+    shortened['head_hash'] = shortened['events'][-1]['hash']
+    shortened['summary'] = summarise(signed.mandate.to_payload(), shortened['events'])
+    assert run(shortened).returncode == 0
+    rejected = run(shortened, *options)
+    assert rejected.returncode == 1 and 'independently saved' in rejected.stdout
+    assert run([], *options).returncode == 1
+
+    checkpoint.write_text(json.dumps({**data, 'public_key': '00' * 32}), encoding='utf-8')
+    wrong_signer = run(bundle, *options)
+    assert wrong_signer.returncode == 1 and 'trusted key' in wrong_signer.stdout
+    checkpoint.write_text(json.dumps({**data, 'checkpoint_version': True}), encoding='utf-8')
+    invalid = run(bundle, *options)
+    assert invalid.returncode == 1 and 'invalid checkpoint' in invalid.stderr
+
+
 @pytest.mark.parametrize('mode', ['no credentials', 'unreachable', 'no orders', 'match', 'invalid bundle'])
 def test_cli_requires_requested_paypal_witness(tmp_path, bundle, world, monkeypatch, capsys, mode):
     import runpy

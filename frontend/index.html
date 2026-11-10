@@ -286,15 +286,32 @@ $('anchor').onclick = async () => {
 $('tamper').onclick = async () => { try { const t = await api('/api/demo/tamper', {}); await refresh(); status($('verifyout'), true, `Event #${t.edited_seq} was edited directly in the database. Now press “Verify chain”.`); } catch (e) { $('verifyout').replaceChildren(el('p', 'err', e.message)); } };
 $('reset').onclick = async () => { await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('result').replaceChildren(); $('evout').replaceChildren(); $('challengeout').replaceChildren(); await refresh(); };
 $('revoke').onclick = async () => { await api('/api/demo/revoke', {}); await refresh(); };
+function downloadJSON(filename, data) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}));
+  const a = el('a'); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 $('dl').onclick = async () => {
-  const b = await api('/api/bundle'); const a = el('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(b, null, 2)], {type:'application/json'}));
-  a.download = 'evidence-' + b.mandate_id + '.json'; a.click();
+  const bundle = await api('/api/bundle');
+  downloadJSON('evidence-' + bundle.mandate_id + '.json', bundle);
 };
 $('checkcur').onclick = async () => {
   const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b});
   const verified = (r.anchors || []).filter(a => a.verified === true);
   const anchors = verified.length ? ` ${verified.length} independent timestamp(s) verified. ${r.events_without_verified_timestamp} event(s) fall outside verified timestamp coverage.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp was verified.');
   status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed. No separately saved head was supplied.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
+  if (r.ok) {
+    const controls = el('div', 'row');
+    const save = el('button', '', 'Save verification checkpoint');
+    save.onclick = () => downloadJSON('checkpoint-' + b.mandate_id + '.json', {
+      checkpoint_version: 1, mandate_id: b.mandate_id, head_hash: b.head_hash,
+      public_key: b.signed_mandate.public_key,
+    });
+    const exportBundle = el('button', '', 'Download this verified bundle');
+    exportBundle.onclick = () => downloadJSON('evidence-' + b.mandate_id + '.json', b);
+    controls.append(save, exportBundle);
+    $('evout').append(controls, el('p', 'note', 'Keep the checkpoint separately. Use it to verify this exact snapshot later.'));
+  }
 };
 $('truncation').onclick = async () => {
   const button = $('truncation'), out = $('challengeout');

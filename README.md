@@ -4,7 +4,7 @@
 
 When an AI agent buys something unexpected, the order receipt tells you what was purchased. Agent Flight Recorder preserves the rest of the story: what the person authorized, what the agent proposed, what the guard decided, and whether the record still matches the evidence saved at purchase time.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![236 tests](https://img.shields.io/badge/tests-236%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![237 tests](https://img.shields.io/badge/tests-237%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
@@ -17,6 +17,8 @@ Open the demo and press **Play the 1-minute story**. It runs the Python guard an
 | A permitted purchase and a hijack attempt | The permitted purchase creates a simulated order. The hijack attempt returns a refusal with explicit reason codes and no order. |
 | A purchase above the approval threshold | It waits for a person, then the guard evaluates it again before placing the order. |
 | **The missing-event challenge** | A shortened bundle still passes signature and chain checks. The separately saved original head exposes the missing event. The challenge works on a copy of the evidence. |
+
+**Take the proof with you.** After the offline check, save the checkpoint and download that verified snapshot. A reviewer can run the CLI on those files without a running demo or PayPal credentials. [Verify the exported files](#verify-a-bundle-yourself)
 
 The repo also records a separate real PayPal sandbox check that recovered the saved log head from an order. The hosted demo simulates PayPal and the dispute submission path remains fake-transport tested. [PayPal integration and verification status](#how-paypal-and-ai-are-used)
 
@@ -136,7 +138,7 @@ And in the dashboard, a direct edit to the database is caught at the exact event
 
 | Check | Result |
 |---|---|
-| Automated tests | **236 passing** |
+| Automated tests | **237 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **221 / 221** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -180,7 +182,7 @@ cd agent-flight-recorder
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 236 tests
+python -m pytest                                    # 237 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -197,13 +199,13 @@ On Windows PowerShell: `$env:DEMO_PAYPAL="simulated"; $env:PYTHONPATH="backend";
 
 ### Verify a bundle yourself
 
-Download a bundle from the dashboard, then, with no server and no network:
+In the dashboard, run a scenario and click **Verify bundle offline**. Click **Save verification checkpoint** and **Download this verified bundle**. Keep the checkpoint somewhere separate that you trust. Both downloads refer to the same snapshot, even if the live log advances. Use the downloaded filenames in this command:
 
 ```bash
-python scripts/verify_bundle.py evidence-<mandate>.json --key <public key> --head <saved head hash>
+python scripts/verify_bundle.py evidence.json --checkpoint checkpoint.json
 ```
 
-It checks the signature, every hash and any timestamp anchors (the latter needs the `openssl` command). Without `--head`, removal of the newest events cannot be detected, and without `--key` the signer is not checked; the script says so when either is missing.
+The CLI verifies the mandate signature against the checkpoint's public key and compares the evidence head with the saved head. It also verifies the event chain and checks timestamp anchors when present (requires `openssl`). A checkpoint obtained from the same untrusted source as the evidence provides no independent protection. You can also supply a previously saved `--key` and `--head` directly.
 
 ### Scripts
 
@@ -227,7 +229,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
                           disputes, webhooks, agent, mcp_server, redteam, demo, server
 frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
 index.html                forwards to the dashboard for static hosting
-tests/                    236 tests, including fuzz and tamper sweeps
+tests/                    237 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README, and HARDENING_REVIEW.md (an external review of the payment lifecycle and request handling)
 DECISIONS.md              non-obvious design choices and why
