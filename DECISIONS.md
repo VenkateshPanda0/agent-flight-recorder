@@ -19,6 +19,9 @@ Non-obvious choices, so they can be explained and challenged.
    survives a process interruption. A definitive rejection releases the reservation.
    An unknown outcome retains it and blocks automatic retry. A confirmed order takes
    over the reservation until a local void or a completed refund releases the applicable limit.
+   Capture attempts are logged before sending. Pending or uncertain captures block void and
+   repeat capture until reconciled. Refunds release budget only after PayPal confirms the
+   requested amount and currency and supplies a refund ID.
 7. **Void is a ledger release, not a PayPal call.** An approved-but-unpaid
    CREATED order has no void endpoint; it lapses on PayPal's side.
 8. **The log head hash is written into each PayPal order's description**

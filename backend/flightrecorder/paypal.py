@@ -28,10 +28,12 @@ _EXPONENT = {"USD": 2, "EUR": 2, "GBP": 2, "CAD": 2, "AUD": 2, "INR": 2, "JPY": 
 
 
 class PayPalError(Exception):
-    def __init__(self, message: str, status: int | None = None, debug_id: str | None = None):
+    def __init__(self, message: str, status: int | None = None, debug_id: str | None = None,
+                 *, issues: tuple[str, ...] = ()):
         super().__init__(message)
         self.status = status
         self.debug_id = debug_id
+        self.issues = issues
 
 
 @dataclass(frozen=True)
@@ -105,8 +107,10 @@ def parse_amount(value: str, currency: str) -> int:
     if currency not in _EXPONENT:
         raise PayPalError(f"Unsupported currency {currency!r}.")
     exponent = _EXPONENT[currency]
-    whole, _, frac = str(value).partition(".")
-    if not whole.isdigit() or (frac and not frac.isdigit()) or len(frac) > exponent:
+    if not isinstance(value, str) or not value.isascii():
+        raise PayPalError("Unreadable amount in PayPal response.")
+    whole, dot, frac = value.partition(".")
+    if not whole.isdigit() or (dot and not frac.isdigit()) or len(frac) > exponent:
         raise PayPalError("Unreadable amount in PayPal response.")
     return int(whole) * 10**exponent + int(frac.ljust(exponent, "0") or 0)
 
@@ -174,11 +178,17 @@ class PayPalClient:
         body = raw[0] if raw else (json.dumps(payload).encode() if payload is not None else None)
         status, data = self._transport(method, f"{self._base}{path}", headers, body)
         if status not in ok:
+            if not isinstance(data, dict):
+                data = {}
+            details = data.get("details")
+            issues = tuple(d["issue"] for d in details if isinstance(d, dict)
+                           and isinstance(d.get("issue"), str)) if isinstance(details, list) else ()
             raise PayPalError(
                 f"PayPal returned {status} for {method} {path.split('?')[0]}: "
                 f"{data.get('name', 'error')}",
                 status,
                 data.get("debug_id"),
+                issues=issues,
             )
         return data
 
@@ -243,6 +253,7 @@ class PayPalClient:
             f"/v2/checkout/orders/{urllib.parse.quote(order_id)}/capture",
             {},
             request_id=request_id,
+            extra_headers={"Prefer": "return=representation"},
         )
 
     def refund_capture(
@@ -253,6 +264,7 @@ class PayPalClient:
             f"/v2/payments/captures/{urllib.parse.quote(capture_id)}/refund",
             {"amount": {"currency_code": currency, "value": format_amount(minor, currency)}},
             request_id=request_id,
+            extra_headers={"Prefer": "return=representation"},
         )
 
     # -- disputes ----------------------------------------------------------

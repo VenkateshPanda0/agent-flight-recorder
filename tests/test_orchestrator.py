@@ -35,7 +35,8 @@ class FakePayPal:
                 {"id": "CAP1", "status": "COMPLETED",
                  "amount": {"currency_code": "USD", "value": amt}}]}}]}
         if path.endswith("/refund"):
-            return 201, {"id": "REF1", "status": "COMPLETED"}
+            assert headers["Prefer"] == "return=representation"
+            return 201, {"id": "REF1", "status": "COMPLETED", "amount": payload["amount"]}
         return 404, {}
 
     def _amount_for(self, order_id):
@@ -393,6 +394,73 @@ def test_completed_capture_cannot_be_sent_again(orch, fake):
     with pytest.raises(OrchestratorError, match='already been captured'):
         orch.capture(order)
     assert len(fake.calls) == before
+
+
+@pytest.mark.parametrize('response', [PayPalError('timeout'), {}])
+def test_unconfirmed_capture_blocks_void_and_capture_replay(orch, monkeypatch, response):
+    order = orch.submit(make_intent()).order_id
+    calls = []
+
+    def capture(*args, **kwargs):
+        calls.append(order)
+        if isinstance(response, PayPalError):
+            raise response
+        return response
+
+    monkeypatch.setattr(orch.paypal, 'capture_order', capture)
+    with pytest.raises((PayPalError, OrchestratorError)):
+        orch.capture(order)
+    with pytest.raises(OrchestratorError):
+        orch.void(order)
+    with pytest.raises(OrchestratorError):
+        orch.capture(order)
+    assert calls == [order]
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+
+
+@pytest.mark.parametrize('amount', [None, {'currency_code': 'USD', 'value': '1.00'},
+                                     {'currency_code': 'EUR', 'value': '89.99'}])
+def test_inconsistent_refund_confirmation_keeps_budget(orch, monkeypatch, amount):
+    order = orch.submit(make_intent()).order_id
+    orch.capture(order)
+    monkeypatch.setattr(orch.paypal, 'refund_capture', lambda *a, **kw: {
+        'id': 'R', 'status': 'COMPLETED', 'amount': amount,
+    })
+    with pytest.raises(OrchestratorError):
+        orch.refund(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+
+
+def test_definitive_capture_rejection_can_be_retried(orch, fake, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+
+    def reject(method, url, headers, body):
+        assert url.endswith('/capture')
+        return 422, {'details': [{'issue': 'ORDER_NOT_APPROVED'}]}
+
+    with monkeypatch.context() as patch:
+        patch.setattr(orch.paypal, '_transport', reject)
+        with pytest.raises(PayPalError):
+            orch.capture(order)
+    assert orch.capture(order)['purchase_units']
+
+
+def test_mismatched_capture_amount_does_not_reduce_reservation(orch, monkeypatch):
+    order = orch.submit(make_intent()).order_id
+    monkeypatch.setattr(orch.paypal, 'capture_order', lambda *a, **kw: {
+        'purchase_units': [{'payments': {'captures': [{
+            'id': 'C', 'status': 'COMPLETED', 'amount': {'currency_code': 'USD', 'value': '1.00'},
+        }]}}],
+    })
+    with pytest.raises(OrchestratorError, match='could not be confirmed'):
+        orch.capture(order)
+    assert orch.ledger.mandate_state('m-1').committed_minor == 8999
+
+
+@pytest.mark.parametrize('value', [89.99, '89.', '²'])
+def test_parse_amount_rejects_malformed_decimal(value):
+    with pytest.raises(PayPalError):
+        parse_amount(value, 'USD')
 
 
 def test_interrupted_order_request_still_reserves_budget_after_reopen(tmp_path, fake, signed, keypair, monkeypatch):
