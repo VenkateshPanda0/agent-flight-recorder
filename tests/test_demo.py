@@ -84,7 +84,9 @@ def test_http_roundtrip():
         return json.load(op.open(r))
     assert post("/api/demo/run", {"scenario": "buy"})["status"] == "ORDER_CREATED"
     assert json.load(opener.open(base + "/api/verify"))["ok"]
-    bundle = json.load(opener.open(base + "/api/bundle"))
+    with opener.open(base + "/api/bundle") as response:
+        assert response.headers['Cache-Control'] == 'no-store'
+        bundle = json.load(response)
     assert post("/api/verify-bundle", {"bundle": bundle})["ok"]
     proof = post("/api/demo/truncation-challenge", {})
     assert proof["shortened_ok"] and not proof["checkpoint_ok"]
@@ -119,7 +121,7 @@ def test_dashboard_reset_waits_for_in_flight_purchase(app, monkeypatch):
     def post(path, body):
         handler = object.__new__(handler_type)
         handler.path = path
-        handler.headers = {'Cookie': f'afr_sid={sid}'}
+        handler.headers = {'Cookie': f'afr_sid={sid}', 'Content-Type': 'application/json'}
         handler._read = lambda: body
         replies = []
         handler._json = lambda status, result: replies.append((status, result))
@@ -159,6 +161,43 @@ def test_webhook_requests_do_not_allocate_or_evict_visitor_sessions(app):
     assert replies == [503]
     assert not hasattr(handler, '_sid')
     assert sessions.get(sid)[0] == sid
+
+
+@pytest.mark.parametrize('headers, status', [
+    ({'Content-Type': 'text/plain'}, 415),
+    ({'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-site'}, 403),
+    ({'Content-Type': 'application/json', 'Origin': 'https://other.example'}, 403),
+    ({'Content-Type': 'application/json', 'Origin': 'null'}, 403),
+    ({'Content-Type': 'Application/JSON; charset=utf-8', 'Origin': 'https://demo.example',
+      'X-Forwarded-Proto': 'https', 'Sec-Fetch-Site': 'same-origin'}, 200),
+])
+def test_dashboard_post_requires_json_and_rejects_cross_origin_requests(app, headers, status):
+    from flightrecorder.server import Sessions, make_handler
+
+    sessions = Sessions(lambda: app)
+    handler = object.__new__(make_handler(sessions, None, True))
+    handler.path = '/api/demo/run'
+    handler.headers = {'Host': 'demo.example', **headers}
+    handler._read = lambda: {'scenario': 'buy'}
+    replies = []
+    handler._json = lambda code, result: replies.append(code)
+    handler.do_POST()
+    assert replies == [status]
+    assert app.state()['summary']['orders_created'] == (1 if status == 200 else 0)
+    assert len(sessions._items) == (1 if status == 200 else 0)
+
+
+def test_non_string_scenario_is_a_bad_request(app):
+    from flightrecorder.server import Sessions, make_handler
+
+    handler = object.__new__(make_handler(Sessions(lambda: app), None, True))
+    handler.path = '/api/demo/run'
+    handler.headers = {'Content-Type': 'application/json'}
+    handler._read = lambda: {'scenario': []}
+    replies = []
+    handler._json = lambda code, result: replies.append((code, result))
+    handler.do_POST()
+    assert replies == [(400, {'error': 'unknown scenario'})]
 
 
 def test_rate_limiter_blocks_per_visitor_and_overall():

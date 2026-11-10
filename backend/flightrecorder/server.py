@@ -93,6 +93,7 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                 secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
                 self.send_header("Set-Cookie",
                                  f"afr_sid={self._sid}; Path=/; HttpOnly; SameSite=Lax{secure}")
+                self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
@@ -145,6 +146,17 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
 
         def do_POST(self):
             path = self.path.split("?")[0]
+            if path != "/webhooks/paypal":
+                media_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                if media_type != "application/json":
+                    return self._json(415, {"error": "expected application/json"})
+                site = self.headers.get("Sec-Fetch-Site")
+                origin = self.headers.get("Origin")
+                scheme = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+                host = self.headers.get("Host")
+                if ((site is not None and site != "same-origin")
+                        or (origin is not None and (not host or origin != f"{scheme}://{host}"))):
+                    return self._json(403, {"error": "cross-origin dashboard request refused"})
             data = self._read()
             if data is None:
                 return
@@ -173,9 +185,10 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
             if limiter is not None and not limiter.allow(self._sid):
                 return self._json(429, {"error": "too many demo actions; try again later"})
             if path == "/api/demo/run":
-                if data.get("scenario") not in SCENARIOS:
+                scenario = data.get("scenario")
+                if not isinstance(scenario, str) or scenario not in SCENARIOS:
                     return self._json(400, {"error": "unknown scenario"})
-                return self._json(200, app.run_scenario(data["scenario"], bool(data.get("llm"))))
+                return self._json(200, app.run_scenario(scenario, bool(data.get("llm"))))
             if path == "/api/demo/approve":
                 return self._json(200, app.approve(str(data.get("intent_id", ""))))
             if path == "/api/demo/revoke":
