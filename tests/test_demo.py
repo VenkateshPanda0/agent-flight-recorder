@@ -147,11 +147,12 @@ def test_paypal_witness_needs_the_real_sandbox_and_checks_orders(monkeypatch):
     rows = app.paypal_witness()
     assert len(rows) == 1 and rows[0]["matches_paypal"] is True
 
-def test_http_reader_rejects_invalid_lengths_and_non_objects():
+def test_http_reader_rejects_invalid_lengths_and_ambiguous_json():
     from io import BytesIO
     from flightrecorder.server import make_handler
     handler_type = make_handler(None, None, False)
-    for length, body in [('-1', b'{}'), ('abc', b'{}'), ('2', b'[]')]:
+    duplicate = b'{"bundle":{"bundle_version":2,"bundle_version":1}}'
+    for length, body in [('-1', b'{}'), ('abc', b'{}'), ('2', b'[]'), (str(len(duplicate)), duplicate)]:
         handler = object.__new__(handler_type)
         handler.headers = {'Content-Length': length}
         handler.rfile = BytesIO(body)

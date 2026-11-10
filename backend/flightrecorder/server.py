@@ -14,6 +14,7 @@ from collections import OrderedDict
 
 from .demo import SCENARIOS, DemoApp, make_shared_client
 from .anchor import AnchorError
+from .canonical import unique_json_object
 from .orchestrator import OrchestratorError
 from .paypal import PayPalError
 from .webhooks import WebhookProcessor
@@ -110,7 +111,7 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
                 self._json(413, {"error": "body too large"})
                 return None
             try:
-                data = json.loads(self.rfile.read(length) or b"{}")
+                data = json.loads(self.rfile.read(length) or b"{}", object_pairs_hook=unique_json_object)
                 if not isinstance(data, dict):
                     raise ValueError
                 return data

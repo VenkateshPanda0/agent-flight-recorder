@@ -15,6 +15,20 @@ import json
 from typing import Any
 
 
+class DuplicateJSONField(ValueError):
+    """A JSON object declares the same field more than once."""
+
+
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """JSON object hook that rejects ambiguous duplicate field names."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJSONField("duplicate JSON field")
+        result[key] = value
+    return result
+
+
 def canonical_json(obj: Any) -> bytes:
     """Serialise ``obj`` to deterministic UTF-8 JSON bytes."""
     _reject_floats(obj)

@@ -38,6 +38,32 @@ def test_clean_bundle_verifies(bundle, world):
     assert check.signature_ok and check.chain_ok
 
 
+@pytest.mark.parametrize('edit', [
+    lambda b: b.update(bundle_version=True),
+    lambda b: b['summary'].update(orders_created=True),
+    lambda b: b['summary'].update(orders_created=1.0),
+    lambda b: b['events'][0].update(note='unhashed assertion'),
+    lambda b: b.update(note='unverified assertion'),
+])
+def test_saved_head_does_not_make_unchecked_edits_acceptable(bundle, edit):
+    head = bundle['head_hash']
+    edit(bundle)
+    assert not verify_bundle(bundle, expected_head_hash=head).ok
+
+
+def test_cli_rejects_duplicate_bundle_fields(bundle, tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    path = tmp_path / 'duplicate.json'
+    path.write_text('{"bundle_version":99,' + json.dumps(bundle)[1:], encoding='utf-8')
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'verify_bundle.py'
+    result = subprocess.run([sys.executable, str(script), str(path)], capture_output=True, text=True)
+    assert result.returncode == 1
+    assert 'duplicate JSON field' in result.stderr
+
+
 def test_summary_says_allowed_and_happened(bundle):
     text = " ".join(bundle["summary"]["plain_language"])
     assert "shoes.example" in text and "MERCHANT_NOT_ALLOWED" in text

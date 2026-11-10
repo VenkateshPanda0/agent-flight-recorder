@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from flightrecorder.evidence import verify_bundle
+from flightrecorder.canonical import DuplicateJSONField, unique_json_object
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("bundle")
@@ -22,8 +23,10 @@ ap.add_argument("--paypal", action="store_true",
                 help="also ask PayPal (sandbox credentials from .env) for its stored copy of the log head at each order")
 args = ap.parse_args()
 try:
-    bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
-except (OSError, ValueError) as exc:
+    bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
+except DuplicateJSONField:
+    raise SystemExit("cannot read bundle: duplicate JSON field") from None
+except (OSError, ValueError, RecursionError) as exc:
     raise SystemExit(f"cannot read bundle: {type(exc).__name__}")
 check = verify_bundle(bundle, trusted_public_key=args.key, expected_head_hash=args.head,
                       verify_anchors=True)

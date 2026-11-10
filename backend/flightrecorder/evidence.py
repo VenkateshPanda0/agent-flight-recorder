@@ -19,12 +19,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import ledger as L
-from .canonical import digest
+from .canonical import canonical_json, digest
 from .ledger import GENESIS_HASH, Ledger, compute_event_hash
 from .mandate import SignedMandate, verify_mandate
 
 BUNDLE_VERSION = 1
 MAX_ANCHORS_VERIFIED = 3
+BUNDLE_FIELDS = {"bundle_version", "mandate_id", "signed_mandate", "mandate_digest",
+                 "events", "head_hash", "summary"}
+EVENT_FIELDS = {"seq", "ts", "type", "mandate_id", "order_ref", "payload", "prev_hash", "hash"}
 
 
 def _money(minor: int, currency: str) -> str:
@@ -159,13 +162,16 @@ def verify_bundle(
     check = BundleCheck()
     try:
         _verify(bundle, check, trusted_public_key, expected_head_hash, verify_anchors)
-    except (KeyError, TypeError, ValueError, AttributeError, IndexError) as error:
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError, RecursionError) as error:
         check.fail(f"bundle is malformed ({type(error).__name__})")
     return check
 
 
 def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
-    if bundle["bundle_version"] != BUNDLE_VERSION:
+    if not isinstance(bundle, dict) or bundle.keys() != BUNDLE_FIELDS:
+        check.fail("bundle fields do not match the evidence format")
+        return
+    if type(bundle["bundle_version"]) is not int or bundle["bundle_version"] != BUNDLE_VERSION:
         check.fail("unsupported bundle version")
     signed = SignedMandate.from_dict(bundle["signed_mandate"])
     mandate_id = signed.mandate.mandate_id
@@ -180,12 +186,18 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
         check.fail("bundle mandate id does not match the mandate")
 
     events = bundle["events"]
+    if not isinstance(events, list):
+        check.fail("events must be a list")
+        return
     prev, seq_expected = GENESIS_HASH, 1
     chain_ok = True
     for ev in events:
+        if not isinstance(ev, dict) or ev.keys() != EVENT_FIELDS:
+            check.fail("event fields do not match the evidence format", seq_expected)
+            return
         seq = ev["seq"]
-        if seq != seq_expected:
-            check.fail("events are missing, duplicated or out of order", seq)
+        if type(seq) is not int or seq != seq_expected:
+            check.fail("events are missing, duplicated or out of order", seq_expected)
             chain_ok = False
             break
         if ev["prev_hash"] != prev:
@@ -214,19 +226,16 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
                if e["type"] == L.MANDATE_GRANTED and e["mandate_id"] == mandate_id]
     if len(granted) != 1:
         check.fail("log does not contain exactly one grant for this mandate")
-    elif granted[0]["payload"] != bundle["signed_mandate"]:
+    elif (canonical_json(granted[0]["payload"]) != canonical_json(bundle["signed_mandate"])
+          or canonical_json(signed.to_dict()) != canonical_json(bundle["signed_mandate"])):
         check.fail("mandate in the log differs from the signed mandate in the bundle",
                    granted[0]["seq"])
 
-    if chain_ok and bundle["summary"] != summarise(signed.mandate.to_payload(), events):
+    if chain_ok and canonical_json(bundle["summary"]) != canonical_json(summarise(signed.mandate.to_payload(), events)):
         check.fail("summary does not match the events")
 
     if chain_ok:
         _check_anchors(events, check, verify_anchors)
-
-    # Canonical form must be hashable; this also rejects smuggled floats.
-    digest(bundle["signed_mandate"])
-
 
 def _check_anchors(events: list[dict], check: BundleCheck, verify_anchors: bool) -> None:
     import base64
