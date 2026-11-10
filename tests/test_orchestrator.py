@@ -277,3 +277,68 @@ def test_evidence_upload_rejects_unsupported_or_unsafe_files(fake):
         with pytest.raises(PayPalError):
             client.provide_evidence_with_document('D', {}, name, data)
     assert fake.calls == []
+
+def test_failed_approved_order_can_request_fresh_approval(orch, fake):
+    intent = make_intent(items=(LineItem('Pro', 'footwear', 11000),))
+    pending = orch.submit(intent)
+    fake.fail_orders = True
+    assert orch.approve(pending.intent_id, 'person').status == 'ORDER_FAILED'
+    fake.fail_orders = False
+    assert orch.submit(intent).status == 'PENDING_APPROVAL'
+    before = len(orch.ledger.events())
+    assert orch.submit(intent).status == 'PENDING_APPROVAL'
+    assert len(orch.ledger.events()) == before
+    assert orch.approve(pending.intent_id, 'person').status == 'ORDER_CREATED'
+
+
+def test_rejected_retry_is_terminal_even_after_earlier_payment_failure(orch, fake):
+    intent = make_intent(items=(LineItem('Pro', 'footwear', 11000),))
+    pending = orch.submit(intent)
+    fake.fail_orders = True
+    orch.approve(pending.intent_id, 'person')
+    fake.fail_orders = False
+    orch.submit(intent)
+    orch.reject(pending.intent_id, 'person')
+    before = len(orch.ledger.events())
+    replay = orch.submit(intent)
+    assert replay.status == 'DENIED'
+    assert replay.verdict.decision is Decision.DENY
+    assert len(orch.ledger.events()) == before
+
+
+def test_replaying_pending_intent_preserves_pending_status(orch):
+    intent = make_intent(items=(LineItem('Pro', 'footwear', 11000),))
+    assert orch.submit(intent).status == 'PENDING_APPROVAL'
+    assert orch.submit(intent).status == 'PENDING_APPROVAL'
+
+
+def test_orchestrators_sharing_ledger_cannot_overspend(orch, fake):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    other = Orchestrator(orch.ledger, orch.paypal, trusted_public_key=orch.trusted_public_key, clock=lambda: T0)
+    entered, release, second_started = threading.Event(), threading.Event(), threading.Event()
+    create = orch.paypal.create_order
+    def delayed(**kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+        return create(**kwargs)
+    orch.paypal.create_order = delayed
+    def second():
+        second_started.set()
+        return other.submit(make_intent(rationale='second shopper'))
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(orch.submit, make_intent())
+        assert entered.wait(5)
+        again = pool.submit(second)
+        assert second_started.wait(5)
+        try:
+            # Old code permits the second purchase while the first is in flight.
+            from concurrent.futures import TimeoutError
+            try: again.result(timeout=0.1)
+            except TimeoutError: pass
+        finally:
+            release.set()
+        outcomes = [first.result(), again.result()]
+    assert sorted(o.status for o in outcomes) == ['DENIED', 'ORDER_CREATED']
+    assert len(fake.order_posts()) == 1

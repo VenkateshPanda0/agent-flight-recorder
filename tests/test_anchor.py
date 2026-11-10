@@ -94,3 +94,22 @@ def test_only_newest_anchors_are_checked_so_uploads_cannot_spawn_many_processes(
     check = verify_bundle(build_bundle(orch.ledger, signed), verify_anchors=True)
     assert check.ok and len(calls) == 3
     assert [a["verified"] for a in check.anchors].count(None) == 5
+
+def test_anchor_cannot_be_interleaved_with_another_ledger_writer():
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    ledger = Ledger()
+    ledger.append('BEFORE', {})
+    with ThreadPoolExecutor(1) as pool:
+        writes = []
+        def post(url, body):
+            writes.append(pool.submit(ledger.append, 'CONCURRENT', {}))
+            try:
+                writes[0].result(timeout=0.1)
+            except TimeoutError:
+                pass
+            return b'token'
+        anchor_ledger(ledger, post=post, verify=lambda h, t: AnchorCheck(True, 'T', 'ok'))
+        writes[0].result(timeout=3)
+    anchor = next(e for e in ledger.events() if e.type == A.ANCHOR_RECORDED)
+    assert anchor.prev_hash == anchor.payload['anchored_hash']
+    assert ledger.verify().ok

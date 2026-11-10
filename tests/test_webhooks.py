@@ -84,3 +84,31 @@ def test_concurrent_webhooks_are_logged_once(signed, keypair, monkeypatch):
         results = [first.result(), second.result()]
     assert sorted(r[1] for r in results) == ['duplicate', 'ok']
     assert sum(e.type == L.WEBHOOK_RECEIVED for e in orch.ledger.events()) == 1
+
+def test_failed_dispute_fetch_is_retried_without_duplicate_receipt(signed, keypair, monkeypatch):
+    from flightrecorder.paypal import PayPalError
+    orch, processor, _ = make(signed, keypair)
+    calls = []
+    original = processor.disputes.open
+    def flaky(dispute_id):
+        calls.append(dispute_id)
+        if len(calls) == 1:
+            raise PayPalError('temporary network failure')
+        return original(dispute_id)
+    monkeypatch.setattr(processor.disputes, 'open', flaky)
+    event = {'id': 'retry-dispute', 'event_type': 'CUSTOMER.DISPUTE.CREATED',
+             'resource': {'dispute_id': 'PP-D-1'}}
+    assert processor.handle(HEADERS, event)[0] == 503
+    processor = WebhookProcessor(orch.ledger, processor.paypal, processor.webhook_id, processor.disputes)
+    assert processor.handle(HEADERS, event) == (200, 'ok')
+    assert processor.handle(HEADERS, event) == (200, 'duplicate')
+    assert len(calls) == 2
+    assert sum(e.type == L.WEBHOOK_RECEIVED for e in orch.ledger.events()) == 1
+    assert sum(e.type == L.DISPUTE_OPENED for e in orch.ledger.events()) == 1
+
+def test_completed_webhook_is_deduplicated_after_processor_restart(signed, keypair):
+    orch, processor, _ = make(signed, keypair)
+    event = {'id': 'restart', 'event_type': 'TEST'}
+    assert processor.handle(HEADERS, event) == (200, 'ok')
+    restarted = WebhookProcessor(orch.ledger, processor.paypal, processor.webhook_id, processor.disputes)
+    assert restarted.handle(HEADERS, event) == (200, 'duplicate')

@@ -65,3 +65,20 @@ Official sources checked on 6 November 2026:
 6. **Low:** monetary prose in evidence assumes two decimal places even though the payment client also supports JPY. Browser CDN availability remains a dependency. There is no full manual accessibility or Safari-on-Apple-device audit.
 
 No Devpost edits were made. No new runtime dependencies or large binary files were added to Git.
+
+## Follow-up review — 11 November 2026
+
+This section supersedes the earlier instance-lock and swallowed-webhook-error findings above. Seven new regression tests bring the suite to **186 passing**.
+
+- **Concurrent purchases exceeded limits** (`orchestrator.py`, `ledger.py`): two orchestrators sharing one Ledger could both evaluate unused budget while the first network call was in flight. `test_orchestrators_sharing_ledger_cannot_overspend` reproduced two orders under a one-order mandate. Orchestrators now share the Ledger's reentrant lock, which also protects direct appends. Separate connections/processes remain unsupported without external coordination.
+- **Failed approved purchases became permanently stuck** (`orchestrator.py`): after PayPal failed, resubmission returned pending but approval/rejection still inspected the first attempt's completed approval. `test_failed_approved_order_can_request_fresh_approval` now passes: approval state is scoped to the most recent submission and the guard still runs again.
+- **Historical failures made later attempts retryable** (`orchestrator.py`): retry eligibility checked for any historical ORDER_FAILED. `test_rejected_retry_is_terminal_even_after_earlier_payment_failure` confirms a later human rejection stays terminal, makes no new events or network calls, and returns DENY with APPROVAL_REJECTED.
+- **Pending replay was reported as denied by MCP** (`orchestrator.py`): replay returned DUPLICATE without an order, which MCP mapped to DENIED. `test_replaying_pending_intent_preserves_pending_status` preserves PENDING_APPROVAL without creating an order.
+- **Dispute processing failures were acknowledged and lost** (`webhooks.py`, `ledger.py`): receipt was logged before dispute lookup, errors were swallowed, and every retry was treated as a duplicate. `test_failed_dispute_fetch_is_retried_without_duplicate_receipt` verifies 503 then successful retry, with one receipt and one dispute-open event. WEBHOOK_PROCESSED now marks completion durably; `test_completed_webhook_is_deduplicated_after_processor_restart` checks restart behavior. Unmatched disputes also remain retryable; deployments must route events to the correct ledger or these retries will not resolve.
+- **Concurrent appends invalidated timestamp placement** (`anchor.py`): an append while waiting for the TSA made the anchor's stored hash differ from its preceding event. `test_anchor_cannot_be_interleaved_with_another_ledger_writer` reproduced the mismatch. Snapshot, timestamp verification, and anchor append now hold the shared operation lock. This serializes writers during the bounded external call.
+
+The six bug reproductions were observed failing before their fixes. The restart test is additional coverage. Full suite: 186 passed; red team: 27/27; tamper sweep: 209/209. The repaired virtual environment uses the updated bundled Python runtime. Pytest used a workspace-local temporary directory because the previous system temporary directory was inaccessible. No live PayPal or TSA requests were made by tests.
+
+Still unresolved: ambiguous remote payment outcomes and reconciliation, independent SQLite connections/processes, catalogue-to-payee identity binding, production HTTP abuse protection, and live sandbox dispute validation. No payment API payloads or request-ID derivation changed in this follow-up.
+
+The patched static story also completed in Chromium/Firefox at 1200px and WebKit at 390px with no page exceptions or horizontal overflow. Heuristic credential scanning and whitespace checks passed before push. Unrelated untracked ctf files were excluded from this commit.

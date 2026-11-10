@@ -106,13 +106,14 @@ def anchor_ledger(ledger: Ledger, tsa_url: str = TSA_URL,
     The token is checked before it is stored, so a bad reply is never logged
     as if it were an anchor.
     """
-    head = ledger.head_hash()
-    token = post(tsa_url, build_request(imprint(head)))
-    check = verify(head, token)
-    if not check.ok:
-        raise AnchorError(check.detail)
-    event = ledger.append(ANCHOR_RECORDED, {
-        "anchored_hash": head, "tsa": tsa_url, "gen_time": check.gen_time,
-        "token_b64": base64.b64encode(token).decode("ascii"),
-    })
+    with ledger.operation_lock:
+        head = ledger.head_hash()
+        token = post(tsa_url, build_request(imprint(head)))
+        check = verify(head, token)
+        if not check.ok:
+            raise AnchorError(check.detail)
+        event = ledger.append(ANCHOR_RECORDED, {
+            "anchored_hash": head, "tsa": tsa_url, "gen_time": check.gen_time,
+            "token_b64": base64.b64encode(token).decode("ascii"),
+        })
     return {"anchored_hash": head, "gen_time": check.gen_time, "event_seq": event.seq}

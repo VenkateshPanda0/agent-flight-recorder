@@ -64,4 +64,6 @@ Non-obvious choices, so they can be explained and challenged.
     signed mandate: stable for a replay under the same mandate, different for every mandate.
 
 20. **Dispute notes, not JSON attachments.** PayPal accepts image/PDF attachments, not JSON. Submission sends notes with the summary, head and bundle digest; retain the returned full bundle separately. This remains fake-transport tested only.
-21. **Single-owner ledger.** Orchestrator locks are instance-local; do not share a SQLite file across processes or multiple orchestrators. Webhook deduplication is serialized within one processor. Pending refunds keep budget reserved. Webhooks do not reconcile capture/refund state, and a local void cannot cancel a remotely approved order.
+21. **Shared ledger lock.** Orchestrators, webhook processors and timestamp recording share the Ledger object's reentrant operation lock. Do not share a SQLite file across processes or separate Ledger connections without external coordination. Webhooks record receipt separately from successful processing, so failed dispute lookups can be retried without duplicating the receipt. Pending refunds keep budget reserved. Webhooks do not reconcile capture/refund state, and a local void cannot cancel a remotely approved order.
+
+22. **Approval belongs to an attempt.** A failed order can be resubmitted for fresh approval. Only the latest attempt controls retry eligibility; an old failure cannot reopen a later rejection. Replaying a pending intent preserves its pending status.

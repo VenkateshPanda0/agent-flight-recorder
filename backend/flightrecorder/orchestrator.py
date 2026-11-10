@@ -8,7 +8,6 @@ reaches PayPal.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
@@ -70,7 +69,7 @@ class Orchestrator:
         self.paypal = paypal
         self.trusted_public_key = trusted_public_key
         self._clock = clock
-        self._lock = threading.RLock()
+        self._lock = ledger.operation_lock
 
     # -- mandates ----------------------------------------------------------
 
@@ -318,13 +317,13 @@ class Orchestrator:
 
     @staticmethod
     def _failed_before_order(events: list[L.Event]) -> bool:
-        """True if the last attempt died at PayPal, so a retry is safe.
+        """Retry only the latest failed attempt, never a later rejection.
 
-        The same intent id is reused as PayPal-Request-Id, so even if the
-        first call actually succeeded on PayPal's side, no second order forms.
+        Remote timeout outcomes still need reconciliation; PayPal's request-id
+        retention is finite. This predicate only describes the local log.
         """
-        types = [e.type for e in events]
-        return L.ORDER_FAILED in types and L.ORDER_CREATED not in types
+        return bool(events) and events[-1].type == L.ORDER_FAILED and not any(
+            e.type == L.ORDER_CREATED for e in events)
 
     def _existing_outcome(self, iid: str) -> Outcome:
         events = self._intent_events(iid)
@@ -334,12 +333,30 @@ class Orchestrator:
         created = next((e for e in events if e.type == L.ORDER_CREATED), None)
         if created:
             return Outcome(iid, verdict, "DUPLICATE", created.order_ref)
+        attempt = self._latest_attempt(events)
+        if any(e.type == L.APPROVAL_DENIED for e in attempt):
+            from .guard import Code, Reason
+            verdict = Verdict(Decision.DENY, (Reason(Code.APPROVAL_REJECTED, "The person rejected this purchase."),))
+            return Outcome(iid, verdict, "DENIED")
+        if verdict.decision is Decision.DENY:
+            return Outcome(iid, verdict, "DENIED")
+        if verdict.decision is Decision.NEEDS_APPROVAL and not any(
+            e.type == L.APPROVAL_GRANTED for e in attempt
+        ):
+            return Outcome(iid, verdict, "PENDING_APPROVAL")
         return Outcome(iid, verdict, "DUPLICATE")
 
+    @staticmethod
+    def _latest_attempt(events: list[L.Event]) -> list[L.Event]:
+        for index in range(len(events) - 1, -1, -1):
+            if events[index].type == L.INTENT_SUBMITTED:
+                return events[index:]
+        return events
+
     def _pending_intent(self, iid: str) -> PurchaseIntent:
-        events = self._intent_events(iid)
+        events = self._latest_attempt(self._intent_events(iid))
         submitted = next((e for e in events if e.type == L.INTENT_SUBMITTED), None)
-        verdict = next((e for e in events if e.type == L.VERDICT_ISSUED), None)
+        verdict = next((e for e in reversed(events) if e.type == L.VERDICT_ISSUED), None)
         if submitted is None or verdict is None:
             raise OrchestratorError("Unknown intent.")
         if verdict.payload["verdict"]["decision"] != Decision.NEEDS_APPROVAL.value:

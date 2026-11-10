@@ -40,6 +40,7 @@ ORDER_REFUNDED = "ORDER_REFUNDED"
 DISPUTE_OPENED = "DISPUTE_OPENED"
 EVIDENCE_SUBMITTED = "EVIDENCE_SUBMITTED"
 WEBHOOK_RECEIVED = "WEBHOOK_RECEIVED"
+WEBHOOK_PROCESSED = "WEBHOOK_PROCESSED"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -119,7 +120,10 @@ class Ledger:
     def __init__(self, path: str = ":memory:") -> None:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        # Serialize multi-step operations by every owner of this Ledger instance.
+        # Separate connections/processes still require external coordination.
+        self.operation_lock = self._lock
         with self._lock:
             self._db.executescript(_SCHEMA)
             self._db.commit()

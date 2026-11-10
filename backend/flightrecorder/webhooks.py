@@ -1,14 +1,13 @@
 """PayPal webhooks: verify, de-duplicate, log, and act on dispute events.
 
 A webhook is only believed after PayPal's verify-webhook-signature API says
-it is genuine. Verified events are logged once per PayPal event id, so
-retries and replays change nothing.
+it is genuine. Verified receipt is logged once per PayPal event id. A separate completion
+record makes failed dispute lookups retryable, including after restart.
 """
 
 from __future__ import annotations
 
 from typing import Mapping
-import threading
 
 from . import ledger as L
 from .disputes import DisputeError, DisputeHandler
@@ -21,11 +20,11 @@ class WebhookProcessor:
                  disputes: DisputeHandler | None = None) -> None:
         self.ledger, self.paypal, self.webhook_id = ledger, paypal, webhook_id
         self.disputes = disputes
-        self._lock = threading.Lock()
+        self._lock = ledger.operation_lock
 
-    def _seen(self, event_id: str) -> bool:
+    def _seen(self, event_id: str, event_type: str = L.WEBHOOK_RECEIVED) -> bool:
         return any(e.payload.get("event_id") == event_id
-                   for e in self.ledger.events() if e.type == L.WEBHOOK_RECEIVED)
+                   for e in self.ledger.events() if e.type == event_type)
 
     def handle(self, headers: Mapping[str, str], event: dict) -> tuple[int, str]:
         """Return (http_status, short_reason)."""
@@ -43,7 +42,7 @@ class WebhookProcessor:
             return self._record(event_id, event)
 
     def _record(self, event_id: str, event: dict) -> tuple[int, str]:
-        if self._seen(event_id):
+        if self._seen(event_id, L.WEBHOOK_PROCESSED):
             return 200, "duplicate"
 
         etype = str(event.get("event_type", ""))
@@ -52,16 +51,21 @@ class WebhookProcessor:
         order_ref = related.get("order_id") or (
             resource.get("id") if etype.startswith("CHECKOUT.ORDER") else None)
         mandate_id = self._mandate_for(order_ref)
-        self.ledger.append(
-            L.WEBHOOK_RECEIVED,
-            {"event_id": event_id, "event_type": etype, "resource_id": resource.get("id")},
-            mandate_id=mandate_id, order_ref=order_ref,
-        )
+        if not self._seen(event_id):
+            self.ledger.append(
+                L.WEBHOOK_RECEIVED,
+                {"event_id": event_id, "event_type": etype, "resource_id": resource.get("id")},
+                mandate_id=mandate_id, order_ref=order_ref,
+            )
         if etype.startswith("CUSTOMER.DISPUTE.") and self.disputes and resource.get("dispute_id"):
             try:
                 self.disputes.open(resource["dispute_id"])
-            except (DisputeError, PayPalError):
-                pass  # unmatched or unreachable; the webhook itself is already logged
+            except PayPalError:
+                return 503, "dispute lookup failed; retry delivery"
+            except DisputeError:
+                return 503, "dispute not yet matched; retry delivery"
+        self.ledger.append(L.WEBHOOK_PROCESSED, {"event_id": event_id},
+                           mandate_id=mandate_id, order_ref=order_ref)
         return 200, "ok"
 
     def _mandate_for(self, order_ref: str | None) -> str | None:
