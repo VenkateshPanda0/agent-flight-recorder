@@ -46,15 +46,6 @@ Official sources checked on 6 November 2026:
 - [Orders](https://developer.paypal.com/api/orders/v2) and [refund](https://developer.paypal.com/api/payments/v2/definitions/refund/): pending is not completed, so budget cannot be released merely because HTTP succeeded.
 - [PayPal's published disputes specification](https://github.com/paypal/paypal-rest-api-specifications/blob/main/openapi/customer_disputes_v1.json): create-dispute is limited release. Current public rendered reference does not establish that this app has buyer-assertion access. The unsigned assertion/payload remains fake-tested and unverified live; sandbox credentials alone may not suffice.
 
-## Claim corrections to mirror on Devpost
-
-- “Live demo uses a real model” → hosted demo replays real recorded proposals; live inference is optional/local.
-- “Full bundle attached to PayPal” → summary/head/digest submitted as notes; retain the JSON separately.
-- “Intent ID is PayPal-Request-Id; retries cannot duplicate orders” → hash includes signed mandate; remote idempotency is time-limited.
-- “Trusted public key catches rebuilt history” → key authenticates the mandate signer; event history needs an independent head/witness.
-- “Public demo cannot use credentials” → static demo is simulated; a configured server can create sandbox orders.
-- Test count 166 → 179. Existing screenshot remains explicitly historical.
-
 ## Remaining risks, ranked
 
 1. **High before any production use:** no durable reconciliation for ambiguous remote outcomes, captures/refunds from outside this process, or expired PayPal idempotency retention. Retrying an order after a remote timeout can also make the witness head differ from the retry's local event. Local void is not remote cancellation. The changed request-ID derivation must not be used to blindly retry an outstanding order from an older release: reconcile it first.
@@ -64,7 +55,7 @@ Official sources checked on 6 November 2026:
 5. **Medium:** live dispute creation/evidence submission, capture/refund, registered webhooks, Render, Anthropic, and Claude Desktop were not exercised. No credentials or accounts were used. Recorded sandbox claims remain historical, not newly verified.
 6. **Low:** monetary prose in evidence assumes two decimal places even though the payment client also supports JPY. Browser CDN availability remains a dependency. There is no full manual accessibility or Safari-on-Apple-device audit.
 
-No Devpost edits were made. No new runtime dependencies or large binary files were added to Git.
+No new runtime dependencies or large binary files were added to Git.
 
 ## Follow-up review — 11 November 2026
 

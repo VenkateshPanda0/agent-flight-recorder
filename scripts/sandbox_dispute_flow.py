@@ -1,10 +1,15 @@
-"""Real PayPal sandbox dispute flow, split in two because a sandbox buyer
-must approve the order in a browser.
+"""Real PayPal sandbox dispute flow. A sandbox buyer must approve the order in a browser.
 
-  python scripts/sandbox_dispute_flow.py start    # creates a guarded order, prints approve link
-  (open the link, log in as a SANDBOX buyer, approve, come back)
-  python scripts/sandbox_dispute_flow.py finish   # capture, dispute, evidence
-  python scripts/sandbox_dispute_flow.py all      # start + headless buyer approval + finish
+Route A (the realistic one): the buyer opens the dispute in the sandbox UI.
+  python scripts/sandbox_dispute_flow.py start             # creates a guarded order, prints approve link
+  (open the link, log in as a SANDBOX buyer, approve)
+  python scripts/sandbox_dispute_flow.py capture           # captures the payment, prints the transaction id
+  (as the same sandbox buyer, open a dispute for that transaction at sandbox.paypal.com > Resolution Center)
+  python scripts/sandbox_dispute_flow.py evidence PP-D-... # links the dispute to the order, answers it with the evidence
+
+Route B (PayPal lists create-dispute as a limited release, so it may be refused for ordinary sandbox apps):
+  python scripts/sandbox_dispute_flow.py finish            # capture, create the dispute through the API, evidence
+  python scripts/sandbox_dispute_flow.py all               # start + headless buyer approval + finish
         (needs SANDBOX_BUYER_EMAIL and SANDBOX_BUYER_PASSWORD in the environment and `npm i playwright`)
 
 State is kept in .afr_flow.json (git-ignored). Secrets are never printed.
@@ -58,6 +63,44 @@ def start():
     print("2) Then run:  python scripts/sandbox_dispute_flow.py finish")
 
 
+def capture():
+    """Capture the approved order and say what the buyer should do next."""
+    st = json.loads(STATE.read_text())
+    client, ledger = build()
+    orch = Orchestrator(ledger, client)
+    order = client.get_order(st["order_id"])
+    print("Order status:", order.get("status"))
+    if order.get("status") != "APPROVED":
+        raise SystemExit("Order is not approved yet; approve it in the browser first.")
+    cap = orch.capture(st["order_id"])
+    capture_id = cap["purchase_units"][0]["payments"]["captures"][0]["id"]
+    print("Captured. Transaction id:", capture_id)
+    print("Now, as the same SANDBOX buyer, open a dispute for this transaction in the Resolution Center at")
+    print("  https://www.sandbox.paypal.com/ (Activity > the payment > Report a problem).")
+    print("Then run:  python scripts/sandbox_dispute_flow.py evidence <dispute id, like PP-D-12345>")
+
+
+def evidence(dispute_id: str):
+    """Link a dispute the buyer opened in the sandbox UI to our order, then answer it with the evidence."""
+    st = json.loads(STATE.read_text())
+    client, ledger = build()
+    signed = SignedMandate.from_dict(st["signed"])
+    handler = DisputeHandler(ledger, client)
+    d = client.get_dispute(dispute_id)
+    print("Dispute status:", d.get("status"), "| reason:", d.get("reason"))
+    try:
+        client.require_evidence(dispute_id, "SELLER_EVIDENCE")
+        print("Dispute moved to the seller-evidence stage.")
+    except PayPalError as e:
+        print("require-evidence skipped:", e.status, e)
+    res = handler.submit_evidence(dispute_id, signed)
+    print("Evidence submitted as notes. Bundle digest:", res["bundle_digest"])
+    out = ROOT / f".afr_bundle_{dispute_id}.json"
+    out.write_text(json.dumps(res["bundle"], indent=1))
+    print("Full bundle saved (git-ignored):", out.name)
+    print("Dispute status now:", client.get_dispute(dispute_id).get("status"))
+
+
 def finish():
     st = json.loads(STATE.read_text())
     client, ledger = build()
@@ -104,4 +147,8 @@ def everything():
 
 
 if __name__ == "__main__":
-    {"start": start, "finish": finish, "all": everything}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: print(__doc__))()
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "evidence" and len(sys.argv) == 3:
+        evidence(sys.argv[2])
+    else:
+        {"start": start, "capture": capture, "finish": finish, "all": everything}.get(cmd, lambda: print(__doc__))()
