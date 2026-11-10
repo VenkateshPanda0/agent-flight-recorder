@@ -220,6 +220,11 @@ def _verify(bundle, check, trusted_key, expected_head, verify_anchors=False):
             check.fail("events are missing, duplicated or out of order", seq_expected)
             chain_ok = False
             break
+        if (not isinstance(ev["payload"], dict) or not isinstance(ev["ts"], str)
+                or not isinstance(ev["type"], str)
+                or any(ev[key] is not None and not isinstance(ev[key], str) for key in ("mandate_id", "order_ref"))):
+            check.fail("event payload or metadata has the wrong type", seq)
+            return
         if ev["prev_hash"] != prev:
             check.fail("previous-hash link is broken", seq)
             chain_ok = False

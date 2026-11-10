@@ -4,7 +4,7 @@
 
 When an AI agent buys something unexpected, the order receipt tells you what was purchased. Agent Flight Recorder preserves the rest of the story: what the person authorized, what the agent proposed, what the guard decided, and whether the record still matches the evidence saved at purchase time.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![263 tests](https://img.shields.io/badge/tests-263%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![269 tests](https://img.shields.io/badge/tests-269%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
@@ -138,7 +138,7 @@ And in the dashboard, a direct edit to the database is caught at the exact event
 
 | Check | Result |
 |---|---|
-| Automated tests | **263 passing** |
+| Automated tests | **269 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **221 / 221** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -184,7 +184,7 @@ cd agent-flight-recorder
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 263 tests
+python -m pytest                                    # 269 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -234,7 +234,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
                           disputes, webhooks, agent, mcp_server, redteam, demo, server
 frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
 index.html                forwards to the dashboard for static hosting
-tests/                    263 tests, including fuzz and tamper sweeps
+tests/                    269 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README, and HARDENING_REVIEW.md (an external review of the payment lifecycle and request handling)
 DECISIONS.md              non-obvious design choices and why

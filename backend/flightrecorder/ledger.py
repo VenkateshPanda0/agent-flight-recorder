@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -67,6 +68,13 @@ CREATE INDEX IF NOT EXISTS idx_events_type_mandate ON events (type, mandate_id);
 # The validity guard keeps corrupt payloads visible to the chain verifier without
 # letting them break index maintenance or prevent the ledger from opening.
 _INTENT_KEY = "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.intent_id') END"
+
+
+def _decode_payload(raw: str) -> dict:
+    payload = json.loads(raw, object_pairs_hook=unique_json_object)
+    if not isinstance(payload, dict):
+        raise TypeError("event payload must be a JSON object")
+    return payload
 
 
 @dataclass(frozen=True)
@@ -160,6 +168,11 @@ class Ledger:
         order_ref: str | None = None,
         ts: datetime | None = None,
     ) -> Event:
+        if not isinstance(type_, str) or any(ref is not None and not isinstance(ref, str)
+                                             for ref in (mandate_id, order_ref)):
+            raise TypeError("event type and references must be strings; references can also be None")
+        if not isinstance(payload, dict):
+            raise TypeError("event payload must be a JSON object")
         stamp = to_iso(ts or utc_now())
         # Round-trip through canonical JSON so what is hashed is exactly
         # what is stored, and unhashable content is refused up front.
@@ -195,7 +208,7 @@ class Ledger:
             type=row["type"],
             mandate_id=row["mandate_id"],
             order_ref=row["order_ref"],
-            payload=json.loads(row["payload"], object_pairs_hook=unique_json_object),
+            payload=_decode_payload(row["payload"]),
             prev_hash=row["prev_hash"],
             hash=row["hash"],
         )
@@ -245,36 +258,26 @@ class Ledger:
     # -- integrity ---------------------------------------------------------
 
     def verify(self) -> ChainCheck:
-        """Recompute every hash from the start and report the first break."""
+        """Stream one SQLite snapshot and recompute every hash up to the first break."""
         with self._lock:
-            rows = self._db.execute("SELECT * FROM events ORDER BY seq").fetchall()
-
-        expected_prev = GENESIS_HASH
-        expected_seq = 1
-        for count, row in enumerate(rows):
-            seq = row["seq"]
-            if seq != expected_seq:
-                return ChainCheck(False, count, expected_seq, "missing or out-of-order event")
-            if row["prev_hash"] != expected_prev:
-                return ChainCheck(False, count, seq, "previous-hash link is broken")
-            try:
-                payload = json.loads(row["payload"], object_pairs_hook=unique_json_object)
-                recomputed = _event_hash(
-                    seq,
-                    row["ts"],
-                    row["type"],
-                    row["mandate_id"],
-                    row["order_ref"],
-                    payload,
-                    row["prev_hash"],
-                )
-            except (ValueError, TypeError, RecursionError):
-                return ChainCheck(False, count, seq, "event payload is unreadable")
-            if recomputed != row["hash"]:
-                return ChainCheck(False, count, seq, "event contents do not match its hash")
-            expected_prev = row["hash"]
-            expected_seq += 1
-        return ChainCheck(True, len(rows))
+            with closing(self._db.execute("SELECT * FROM events ORDER BY seq")) as rows:
+                expected_prev, count = GENESIS_HASH, 0
+                for row in rows:
+                    seq = row["seq"]
+                    if seq != count + 1:
+                        return ChainCheck(False, count, count + 1, "missing or out-of-order event")
+                    if row["prev_hash"] != expected_prev:
+                        return ChainCheck(False, count, seq, "previous-hash link is broken")
+                    try:
+                        recomputed = _event_hash(seq, row["ts"], row["type"], row["mandate_id"],
+                                                 row["order_ref"], _decode_payload(row["payload"]), expected_prev)
+                    except (ValueError, TypeError, RecursionError):
+                        return ChainCheck(False, count, seq, "event payload is unreadable")
+                    if recomputed != row["hash"]:
+                        return ChainCheck(False, count, seq, "event contents do not match its hash")
+                    expected_prev = row["hash"]
+                    count += 1
+                return ChainCheck(True, count)
 
     # -- derived state -----------------------------------------------------
 

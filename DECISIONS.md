@@ -10,8 +10,9 @@ Non-obvious choices, so they can be explained and challenged.
    call; a denied purchase makes no network call at all (tested).
    The orchestrator verifies the full chain before changing mandates, approvals or
    payment state. A broken chain stops the operation before it can use damaged budget
-   or revocation history. This costs one linear scan and provides integrity within the
-   current ledger. Detecting a fully rebuilt history requires an independent witness.
+   or revocation history. This costs one linear scan over a single SQLite snapshot.
+   Rows are streamed to keep Python memory independent of event count. Detecting a
+   fully rebuilt history requires an independent witness.
 4. **Replayed intents are idempotent.** The intent id is the hash of the
    intent. Re-submitting returns the earlier result and creates no second
    order. A hash of this id and the signed mandate is sent as `PayPal-Request-Id`. If the earlier attempt

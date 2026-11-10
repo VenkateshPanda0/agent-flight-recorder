@@ -38,6 +38,20 @@ def test_clean_bundle_verifies(bundle, world):
     assert check.signature_ok and check.chain_ok
 
 
+def test_verifier_rejects_non_object_payload_in_an_unrelated_mandate(bundle):
+    from flightrecorder.ledger import compute_event_hash
+
+    event = {'seq': len(bundle['events']) + 1, 'ts': '2026-10-06T12:00:00Z',
+             'type': 'TEST', 'mandate_id': 'unrelated', 'order_ref': None,
+             'payload': [], 'prev_hash': bundle['head_hash']}
+    event['hash'] = compute_event_hash(event['seq'], event['ts'], event['type'], event['mandate_id'],
+                                      event['order_ref'], event['payload'], event['prev_hash'])
+    bundle['events'].append(event)
+    bundle['head_hash'] = event['hash']
+    check = verify_bundle(bundle)
+    assert not check.ok and check.first_bad_seq == event['seq']
+
+
 @pytest.mark.parametrize('edit', [
     lambda b: b.update(bundle_version=True),
     lambda b: b['summary'].update(orders_created=True),

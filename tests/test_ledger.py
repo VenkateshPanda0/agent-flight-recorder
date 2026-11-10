@@ -209,6 +209,24 @@ def test_ledger_verifier_rejects_duplicate_payload_fields():
     assert not result.ok and result.first_bad_seq == 1
 
 
+@pytest.mark.parametrize('fields', [{'payload': []}, {'order_ref': 123}, {'mandate_id': False}, {'type_': 42}])
+def test_append_rejects_fields_that_cannot_round_trip_as_an_event(fields):
+    log = Ledger()
+    with pytest.raises(TypeError):
+        log.append(**{**{'type_': 'TEST', 'payload': {}}, **fields})
+    assert log.events() == []
+
+
+def test_hash_consistent_non_object_payload_is_rejected():
+    log = Ledger()
+    event = log.append('TEST', {})
+    replacement = L.compute_event_hash(event.seq, event.ts, event.type, None, None, [], event.prev_hash)
+    with log._db:
+        log._db.execute('UPDATE events SET payload = ?, hash = ?', ('[]', replacement))
+    result = log.verify()
+    assert not result.ok and result.first_bad_seq == event.seq
+
+
 def test_ledger_persists_to_disk(tmp_path):
     path = str(tmp_path / "recorder.sqlite")
     first = Ledger(path)
