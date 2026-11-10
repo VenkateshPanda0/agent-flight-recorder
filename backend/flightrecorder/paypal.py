@@ -8,16 +8,18 @@ purpose. Credentials never appear in ``repr`` or in error messages.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
+import re
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
 SANDBOX_URL = "https://api-m.sandbox.paypal.com"
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 # (status, parsed JSON body or {}); raised errors are PayPalError only.
 Transport = Callable[[str, str, Mapping[str, str], bytes | None], tuple[int, dict]]
@@ -65,23 +67,51 @@ class PayPalConfig:
         return cls(client_id, secret, env)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Authorization belongs to the original sandbox endpoint only.
+        return None
+
+
 def urllib_transport(
     method: str, url: str, headers: Mapping[str, str], body: bytes | None
 ) -> tuple[int, dict]:
+    if not url.startswith(SANDBOX_URL + "/"):
+        raise PayPalError("Only the PayPal sandbox is supported.")
     request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
+    opener = urllib.request.build_opener(_NoRedirect())
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            raw = response.read()
-            status = response.status
-    except urllib.error.HTTPError as error:
-        raw = error.read()
-        status = error.code
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        try:
+            response = opener.open(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            status = response.getcode()
+            if 300 <= status < 400:
+                return status, {}
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            declared = response.headers.get("Content-Length")
+            if response.headers.get("Transfer-Encoding"):
+                declared = None  # Chunk framing is checked by the HTTP reader.
+    except (OSError, http.client.HTTPException) as error:
         raise PayPalError(f"Network error talking to PayPal: {type(error).__name__}") from None
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise PayPalError("PayPal response exceeded the size limit.")
+    if method != "HEAD" and status not in (204, 205) and declared is not None:
+        declared = declared.strip()
+        if not declared.isascii() or not declared.isdecimal() or (declared.lstrip("0") or "0") != str(len(raw)):
+            raise PayPalError("PayPal response did not match its declared length.")
     try:
-        return status, (json.loads(raw) if raw else {})
-    except ValueError:
+        data = json.loads(raw) if raw else {}
+        return status, data if isinstance(data, dict) else {}
+    except (ValueError, RecursionError):
         return status, {}
+
+
+def _resource_id(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", value):
+        raise PayPalError("Invalid PayPal resource ID.")
+    return value
 
 
 def digest_boundary(content: bytes) -> str:
@@ -122,7 +152,7 @@ class PayPalClient:
         transport: Transport = urllib_transport,
         base_url: str = SANDBOX_URL,
     ) -> None:
-        if base_url != SANDBOX_URL:
+        if base_url != SANDBOX_URL or config.env != "sandbox":
             raise PayPalError("Only the PayPal sandbox is supported.")
         self._config = config
         self._transport = transport
@@ -245,12 +275,12 @@ class PayPalClient:
         return self._request("POST", "/v2/checkout/orders", order, request_id=request_id)
 
     def get_order(self, order_id: str) -> dict:
-        return self._request("GET", f"/v2/checkout/orders/{urllib.parse.quote(order_id)}")
+        return self._request("GET", f"/v2/checkout/orders/{_resource_id(order_id)}")
 
     def capture_order(self, order_id: str, request_id: str | None = None) -> dict:
         return self._request(
             "POST",
-            f"/v2/checkout/orders/{urllib.parse.quote(order_id)}/capture",
+            f"/v2/checkout/orders/{_resource_id(order_id)}/capture",
             {},
             request_id=request_id,
             extra_headers={"Prefer": "return=representation"},
@@ -261,7 +291,7 @@ class PayPalClient:
     ) -> dict:
         return self._request(
             "POST",
-            f"/v2/payments/captures/{urllib.parse.quote(capture_id)}/refund",
+            f"/v2/payments/captures/{_resource_id(capture_id)}/refund",
             {"amount": {"currency_code": currency, "value": format_amount(minor, currency)}},
             request_id=request_id,
             extra_headers={"Prefer": "return=representation"},
@@ -273,12 +303,12 @@ class PayPalClient:
         return self._request("GET", f"/v1/customer/disputes?page_size={int(page_size)}")
 
     def get_dispute(self, dispute_id: str) -> dict:
-        return self._request("GET", f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}")
+        return self._request("GET", f"/v1/customer/disputes/{_resource_id(dispute_id)}")
 
     def provide_evidence(self, dispute_id: str, payload: dict) -> dict:
         return self._request(
             "POST",
-            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/provide-evidence",
+            f"/v1/customer/disputes/{_resource_id(dispute_id)}/provide-evidence",
             payload,
             ok=(200, 201, 202, 204),
         )
@@ -306,7 +336,7 @@ class PayPalClient:
         ]
         return self._request(
             "POST",
-            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/provide-evidence",
+            f"/v1/customer/disputes/{_resource_id(dispute_id)}/provide-evidence",
             ok=(200, 201, 202, 204),
             raw=(crlf.join(parts), f"multipart/form-data; boundary={boundary}"),
         )
@@ -346,7 +376,7 @@ class PayPalClient:
         """Sandbox-only helper: move a dispute into the evidence stage."""
         return self._request(
             "POST",
-            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/require-evidence",
+            f"/v1/customer/disputes/{_resource_id(dispute_id)}/require-evidence",
             {"action": action},
         )
 
@@ -354,7 +384,7 @@ class PayPalClient:
         """Sandbox-only helper: settle a dispute (BUYER_FAVOR or SELLER_FAVOR)."""
         return self._request(
             "POST",
-            f"/v1/customer/disputes/{urllib.parse.quote(dispute_id)}/adjudicate",
+            f"/v1/customer/disputes/{_resource_id(dispute_id)}/adjudicate",
             {"adjudication_outcome": outcome},
         )
 

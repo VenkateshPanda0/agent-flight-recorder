@@ -37,6 +37,8 @@ Non-obvious choices, so they can be explained and challenged.
     and the bundle together needs an independently retained head or external witness to expose it.
     A trusted public key authenticates the mandate signer only, not the event history.
 12. **Sandbox only.** `PayPalClient` refuses any base URL except the sandbox.
+    The HTTP transport rejects redirects and bounds response bodies. Resource IDs
+    must fit in one path segment before OAuth or any API call can run.
 13. **The server demo is rate limited; GitHub Pages has simulated PayPal.** Demo actions are
     limited per visitor and overall; dispute submission from the dashboard is off
     unless `ALLOW_DISPUTE_SUBMIT=1`; each visitor gets an isolated in-memory demo. A server configured with sandbox credentials can create sandbox orders for visitors.
