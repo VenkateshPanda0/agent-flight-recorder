@@ -133,6 +133,9 @@ ul.plain { margin:0; padding-left:18px; } ul.plain li { margin:4px 0; }
       <button id="witness" hidden>Cross-check with PayPal's copy</button>
     </div>
     <p class="note">The verifier recomputes every hash and the mandate signature with no database.</p>
+    <div class="row"><button id="truncation">Try the missing-event challenge</button></div>
+    <p class="note">See what happens when the newest event is removed and an earlier copy of the head is available.</p>
+    <div id="challengeout" aria-live="polite"></div>
     <label class="note" for="disp">PayPal sandbox dispute id (submit summary and bundle digest; keep the JSON bundle separately)</label>
     <input type="text" id="disp" placeholder="PP-D-12345">
     <div class="row"><button id="submitev">Submit evidence to dispute</button></div>
@@ -179,6 +182,7 @@ def handle(path, body_json):
         elif path == "/api/demo/tamper": res = app.tamper()
         elif path == "/api/demo/reset": app.reset(); res = {"ok": True}
         elif path == "/api/demo/anchor": return json.dumps({"ok": False, "error": NO_ANCHOR})
+        elif path == "/api/demo/truncation-challenge": res = app.truncation_challenge()
         elif path == "/api/demo/dispute-evidence": return json.dumps({"ok": False, "error": "Dispute submission needs the real PayPal sandbox; it is not available in the browser-only demo."})
         else: return json.dumps({"ok": False, "error": "not found"})
         return json.dumps({"ok": True, "data": res})
@@ -280,17 +284,35 @@ $('anchor').onclick = async () => {
   $('anchor').disabled = false;
 };
 $('tamper').onclick = async () => { try { const t = await api('/api/demo/tamper', {}); await refresh(); status($('verifyout'), true, `Event #${t.edited_seq} was edited directly in the database. Now press “Verify chain”.`); } catch (e) { $('verifyout').replaceChildren(el('p', 'err', e.message)); } };
-$('reset').onclick = async () => { await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('result').replaceChildren(); $('evout').replaceChildren(); await refresh(); };
+$('reset').onclick = async () => { await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('result').replaceChildren(); $('evout').replaceChildren(); $('challengeout').replaceChildren(); await refresh(); };
 $('revoke').onclick = async () => { await api('/api/demo/revoke', {}); await refresh(); };
 $('dl').onclick = async () => {
   const b = await api('/api/bundle'); const a = el('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(b, null, 2)], {type:'application/json'}));
   a.download = 'evidence-' + b.mandate_id + '.json'; a.click();
 };
 $('checkcur').onclick = async () => {
-  const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b, expected_head_hash:b.head_hash});
+  const b = await api('/api/bundle'); const r = await api('/api/verify-bundle', {bundle:b});
   const verified = (r.anchors || []).filter(a => a.verified === true);
   const anchors = verified.length ? ` ${verified.length} independent timestamp(s) verified. ${r.events_without_verified_timestamp} event(s) fall outside verified timestamp coverage.` : (staticMode ? ' (Timestamp anchoring is not available in the browser-only demo.)' : ' No independent timestamp was verified.');
-  status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
+  status($('evout'), r.ok, r.ok ? 'Bundle verified offline: signature valid, every hash recomputed. No separately saved head was supplied.' + anchors : 'Bundle FAILED: ' + r.problems.join('; '));
+};
+$('truncation').onclick = async () => {
+  const button = $('truncation'), out = $('challengeout');
+  button.disabled = true;
+  try {
+    const r = await api('/api/demo/truncation-challenge', {});
+    const results = el('ul', 'plain');
+    for (const [label, passed] of [['Original bundle', r.original_ok],
+      ['Shortened bundle · signature and chain only', r.shortened_ok],
+      ['Shortened bundle · with the saved head', r.checkpoint_ok]]) {
+      const row = el('li');
+      row.append(el('strong', '', passed ? 'Pass: ' : 'Rejected: '), document.createTextNode(label));
+      results.append(row);
+    }
+    out.replaceChildren(el('p', 'note', `Removed event #${r.removed_seq} (${r.removed_type}) from a copy. The live ledger is intact.`), results,
+      el('p', 'note', `Saved head ${r.saved_head.slice(0, 12)}… · Shortened head ${r.shortened_head.slice(0, 12)}…`));
+  } catch (e) { out.replaceChildren(el('p', 'err', e.message)); }
+  finally { button.disabled = false; }
 };
 $('witness').onclick = async () => {
   $('witness').disabled = true;
@@ -323,7 +345,7 @@ async function playTour() {
   const hold = async sec => { for (let i = 0; i < sec * 10 && touring; i++) await sleep(100); };
   const T = 9;
   try {
-    await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('evout').replaceChildren(); $('result').replaceChildren(); await refresh();
+    await api('/api/demo/reset', {}); badSeq = null; $('verifyout').replaceChildren(); $('evout').replaceChildren(); $('challengeout').replaceChildren(); $('result').replaceChildren(); await refresh();
     say(1, T, 'A person has signed a mandate: $250 budget, $120 per order, one merchant, expires in a week. Everything that follows is checked against it.'); jump('[aria-labelledby=h-mandate]'); await hold(6);
     if (!touring) return;
     say(2, T, 'The agent buys within its mandate. Plain deterministic code allows it and a PayPal order is created.'); jump('[aria-labelledby=h-agent]');
@@ -342,7 +364,7 @@ async function playTour() {
     if (!touring) return;
     say(5, T, 'Above the approval threshold, the person is asked. Approval re-runs the guard, so a human yes can never override a hard rule.');
     showResult(await api('/api/demo/run', { scenario: 'approval', llm: false })); await refresh(); await hold(4);
-    const ok = document.querySelector('#result button'); if (ok && touring) ok.click();
+    const ok = document.querySelector('#result button'); if (ok && touring) await ok.onclick();
     await hold(5);
     if (!touring) return;
     say(6, T, staticMode ? 'Every step is in an append-only log; each event holds the hash of the one before it, so a past edit breaks every hash after it.'
@@ -350,8 +372,8 @@ async function playTour() {
     if (!staticMode) await $('anchor').onclick();
     await hold(5);
     if (!touring) return;
-    say(7, T, 'The evidence bundle (the signed mandate plus the full log) verifies offline: the signature and every hash' + (staticMode ? '.' : ', and the timestamp.')); jump('[aria-labelledby=h-ev]');
-    await $('checkcur').onclick(); await hold(7);
+    say(7, T, 'The evidence bundle verifies offline. Remove its newest event and the remaining chain still verifies. Compare it with the saved head and the missing event is detected.'); jump('[aria-labelledby=h-ev]');
+    await $('checkcur').onclick(); if (touring) await $('truncation').onclick(); await hold(7);
     if (!touring) return;
     say(8, T, 'Now someone edits one event directly in the database. Verification fails and points at the exact event.'); jump('[aria-labelledby=h-log]');
     await $('tamper').onclick(); await hold(2); if (touring) await $('verify').onclick(); await hold(8);

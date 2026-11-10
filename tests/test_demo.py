@@ -21,6 +21,25 @@ def test_full_demo_story(app):
     assert app.verify_bundle(app.bundle())["ok"]
 
 
+@pytest.mark.parametrize('scenario, removed', [('buy', 'ORDER_CREATED'), ('injection', 'VERDICT_ISSUED')])
+def test_missing_event_challenge_detects_truncation_without_editing_live_log(app, scenario, removed):
+    with pytest.raises(ValueError, match='Run a purchase scenario'):
+        app.truncation_challenge()
+    app.run_scenario(scenario)
+    before = app.bundle()
+    proof = app.truncation_challenge()
+    assert proof['original_ok'] is True
+    assert proof['shortened_ok'] is True
+    assert proof['checkpoint_ok'] is False
+    assert proof['removed_type'] == removed
+    assert proof['saved_head'] == before['head_hash']
+    assert proof['shortened_head'] == before['events'][-2]['hash']
+    assert app.bundle() == before
+    app.tamper()
+    with pytest.raises(ValueError, match='current evidence is damaged'):
+        app.truncation_challenge()
+
+
 def test_tamper_is_caught_at_the_exact_event(app):
     app.run_scenario("buy")
     edited = app.tamper()["edited_seq"]
@@ -67,6 +86,8 @@ def test_http_roundtrip():
     assert json.load(opener.open(base + "/api/verify"))["ok"]
     bundle = json.load(opener.open(base + "/api/bundle"))
     assert post("/api/verify-bundle", {"bundle": bundle})["ok"]
+    proof = post("/api/demo/truncation-challenge", {})
+    assert proof["shortened_ok"] and not proof["checkpoint_ok"]
     # A second visitor has their own, untouched demo.
     other = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
     assert json.load(other.open(base + "/api/state"))["summary"]["orders_created"] == 0

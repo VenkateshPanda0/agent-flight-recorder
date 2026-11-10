@@ -199,6 +199,27 @@ class DemoApp:
     def bundle(self) -> dict:
         return build_bundle(self.ledger, self.signed)
 
+    def truncation_challenge(self) -> dict:
+        """Compare the current evidence with a valid prefix against the original head."""
+        bundle = self.bundle()
+        events = bundle["events"]
+        if len(events) < 2:
+            raise ValueError("Run a purchase scenario before trying the missing-event challenge.")
+        head = bundle["head_hash"]
+        trusted = {"trusted_public_key": self.public_key}
+        original = verify_bundle(bundle, expected_head_hash=head, **trusted)
+        if not original.ok:
+            raise ValueError("The current evidence is damaged. Reset and run a scenario first.")
+        prefix = events[:-1]
+        shortened = {**bundle, "events": prefix, "head_hash": prefix[-1]["hash"],
+                     "summary": summarise(self.signed.mandate.to_payload(), prefix)}
+        unpinned = verify_bundle(shortened, **trusted)
+        pinned = verify_bundle(shortened, expected_head_hash=head, **trusted)
+        return {"original_ok": original.ok, "shortened_ok": unpinned.ok,
+                "checkpoint_ok": pinned.ok, "removed_seq": events[-1]["seq"],
+                "removed_type": events[-1]["type"], "saved_head": head,
+                "shortened_head": shortened["head_hash"]}
+
     def verify_current(self) -> dict:
         check = self.ledger.verify()
         return {"ok": check.ok, "checked": check.checked, "first_bad_seq": check.first_bad_seq,

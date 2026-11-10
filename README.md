@@ -2,21 +2,27 @@
 
 **Who allowed the AI agent to buy that, and can you prove it?**
 
-AI agents are starting to spend people's money. When one of those purchases is disputed, the dispute process has no record of what the agent was permitted to do, and the agent's own logs are just text that anyone with database access could rewrite. Agent Flight Recorder keeps the missing record: a **signed permission**, a **deterministic check before any money moves**, a **tamper-evident log**, and an **evidence bundle anyone can verify offline**.
+When an AI agent buys something unexpected, the order receipt tells you what was purchased. Agent Flight Recorder preserves the rest of the story: what the person authorized, what the agent proposed, what the guard decided, and whether the record still matches the evidence saved at purchase time.
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![234 tests](https://img.shields.io/badge/tests-234%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue) ![PayPal sandbox only](https://img.shields.io/badge/PayPal-sandbox%20only-orange) ![236 tests](https://img.shields.io/badge/tests-236%20passing-brightgreen)
 
 Built for the PayPal AI Hackathon. **Sandbox only: no real money moves.**
 
+## Try the proof in one minute
+
+Open the demo and press **Play the 1-minute story**. It runs the Python guard and verifier in your browser, with simulated PayPal and a replay of a real model's recorded proposal. [Open the live demo](https://venkateshpanda0.github.io/agent-flight-recorder/)
+
+| Watch for | What you can verify |
+|---|---|
+| A permitted purchase and a hijack attempt | The permitted purchase creates a simulated order. The hijack attempt returns a refusal with explicit reason codes and no order. |
+| A purchase above the approval threshold | It waits for a person, then the guard evaluates it again before placing the order. |
+| **The missing-event challenge** | A shortened bundle still passes signature and chain checks. The separately saved original head exposes the missing event. The challenge works on a copy of the evidence. |
+
+The repo also records a separate real PayPal sandbox check that recovered the saved log head from an order. The hosted demo simulates PayPal and the dispute submission path remains fake-transport tested. [PayPal integration and verification status](#how-paypal-and-ai-are-used)
+
+Run `python scripts/redteam_report.py` after installing the requirements to reproduce the attack and tamper counts, or run the local server for timestamp anchoring and optional sandbox calls. [Setup instructions](#run-it)
+
 ![The dashboard: a signed mandate, the guard's verdicts, the hash-chained log with a tampered event flagged, and the evidence panel](docs/shot-hero.png)
-
-## Try it
-
-**Live demo: https://venkateshpanda0.github.io/agent-flight-recorder/** (opens in about 10 seconds; no install, no login).
-
-- **One click:** open the dashboard and press **"Play the 1-minute story"**. It runs the whole flow for you: an allowed purchase, a hijack attempt refused, a real AI model's proposal denied, an approval, offline verification, and a tampered event caught.
-- **Browser-only demo (no server):** `frontend/index.html` runs the *real Python backend inside the page* (via Pyodide) when no server is present, with a simulated PayPal. The same code, the same guard and the same verifier, served as plain static files, so it works on any static host. This repo's GitHub Pages site is exactly that (`index.html` at the repo root forwards to it). Timestamp anchoring needs network and `openssl`, so it is only in the server version and the command-line verifier.
-- **Full server version:** see [Run it](#run-it).
 
 ## The idea in four moves
 
@@ -130,7 +136,7 @@ And in the dashboard, a direct edit to the database is caught at the exact event
 
 | Check | Result |
 |---|---|
-| Automated tests | **234 passing** |
+| Automated tests | **236 passing** |
 | Red-team suite (`scripts/redteam_report.py`) | **27 / 27** attack scenarios blocked: prompt-injected rationale, under-reported totals, negative or float prices, lookalike and homoglyph merchants, currency swap, replay, expiry, revocation, order splitting, forged mandate |
 | Bundle tamper sweep | **221 / 221** single-field edits, deletions and adjacent swaps on a real evidence bundle detected by the offline verifier |
 | Guard vs. independent oracle | **5,000 / 5,000** seeded random cases matched on decision and exact reason codes (1,527 allow, 306 needs-approval, 3,167 deny) |
@@ -174,7 +180,7 @@ cd agent-flight-recorder
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest                                    # 234 tests
+python -m pytest                                    # 236 tests
 python scripts/redteam_report.py                    # red-team block rate + bundle tamper sweep
 
 # the dashboard, with a simulated PayPal (needs no credentials)
@@ -221,7 +227,7 @@ backend/flightrecorder/   mandate, guard, ledger, orchestrator, paypal, evidence
                           disputes, webhooks, agent, mcp_server, redteam, demo, server
 frontend/index.html       single-page dashboard (also runs the Python backend in-browser)
 index.html                forwards to the dashboard for static hosting
-tests/                    234 tests, including fuzz and tamper sweeps
+tests/                    236 tests, including fuzz and tamper sweeps
 scripts/                  verifier, reports, evaluation and sandbox tools
 docs/                     screenshots used in this README, and HARDENING_REVIEW.md (an external review of the payment lifecycle and request handling)
 DECISIONS.md              non-obvious design choices and why
