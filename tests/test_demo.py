@@ -58,6 +58,70 @@ def test_http_roundtrip():
     srv.shutdown()
 
 
+def test_dashboard_reset_waits_for_in_flight_purchase(app, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from threading import Event
+    from flightrecorder.server import Sessions, make_handler
+
+    sessions = Sessions(lambda: app)
+    sid, _ = sessions.get(None)
+    handler_type = make_handler(sessions, None, True)
+    entered, release, reset_started = Event(), Event(), Event()
+    original = app._client.create_order
+    old_ledger = app.ledger
+
+    def delayed_create(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(**kwargs)
+
+    monkeypatch.setattr(app._client, 'create_order', delayed_create)
+
+    def post(path, body):
+        handler = object.__new__(handler_type)
+        handler.path = path
+        handler.headers = {'Cookie': f'afr_sid={sid}'}
+        handler._read = lambda: body
+        replies = []
+        handler._json = lambda status, result: replies.append((status, result))
+        if path.endswith('/reset'):
+            reset_started.set()
+        handler.do_POST()
+        return replies[0]
+
+    with ThreadPoolExecutor(2) as pool:
+        purchase = pool.submit(post, '/api/demo/run', {'scenario': 'buy'})
+        assert entered.wait(5)
+        reset = pool.submit(post, '/api/demo/reset', {})
+        assert reset_started.wait(5)
+        try:
+            with pytest.raises(TimeoutError):
+                reset.result(timeout=0.1)
+            assert app.ledger is old_ledger
+        finally:
+            release.set()
+        assert purchase.result()[1]['status'] == 'ORDER_CREATED'
+        assert reset.result()[0] == 200
+    assert app.ledger is not old_ledger
+
+
+def test_webhook_requests_do_not_allocate_or_evict_visitor_sessions(app):
+    from flightrecorder.server import Sessions, make_handler
+
+    sessions = Sessions(lambda: app, cap=1)
+    sid, _ = sessions.get(None)
+    handler = object.__new__(make_handler(sessions, None, True))
+    handler.path = '/webhooks/paypal'
+    handler.headers = {}
+    handler._read = lambda: {}
+    replies = []
+    handler._json = lambda status, result: replies.append(status)
+    handler.do_POST()
+    assert replies == [503]
+    assert not hasattr(handler, '_sid')
+    assert sessions.get(sid)[0] == sid
+
+
 def test_rate_limiter_blocks_per_visitor_and_overall():
     from flightrecorder.server import RateLimiter
     rl = RateLimiter(per_visitor=2, overall=3, window=10)

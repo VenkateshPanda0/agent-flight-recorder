@@ -129,65 +129,70 @@ def make_handler(sessions: Sessions, webhooks: WebhookProcessor | None, demo_act
             app = self._app()
             if path in ("/", "/index.html"):
                 self._send(200, (FRONTEND / "index.html").read_bytes(), "text/html; charset=utf-8")
-            elif path == "/api/state":
-                self._json(200, app.state())
-            elif path == "/api/verify":
-                self._json(200, app.verify_current())
-            elif path == "/api/bundle":
-                self._json(200, app.bundle())
             else:
-                self._json(404, {"error": "not found"})
+                read = {"/api/state": app.state, "/api/verify": app.verify_current,
+                        "/api/bundle": app.bundle}.get(path)
+                if read is None:
+                    return self._json(404, {"error": "not found"})
+                with app.request_lock:
+                    result = read()
+                self._json(200, result)
 
         def do_POST(self):
             path = self.path.split("?")[0]
             data = self._read()
             if data is None:
                 return
-            app = self._app()
             try:
                 if path == "/webhooks/paypal":
                     if webhooks is None:
                         return self._json(503, {"error": "webhooks not configured"})
                     status, reason = webhooks.handle(dict(self.headers), data)
                     return self._json(status, {"result": reason})
-                if path == "/api/verify-bundle":
-                    if limiter is not None and not limiter.allow(self._sid):
-                        return self._json(429, {"error": "too many requests; try again later"})
-                    return self._json(200, app.verify_bundle(data.get("bundle", {}),
-                                                             data.get("expected_head_hash")))
-                if not demo_actions:
-                    return self._json(403, {"error": "demo actions are disabled"})
-                if limiter is not None and not limiter.allow(self._sid):
-                    return self._json(429, {"error": "too many demo actions; try again later"})
-                if path == "/api/demo/run":
-                    if data.get("scenario") not in SCENARIOS:
-                        return self._json(400, {"error": "unknown scenario"})
-                    return self._json(200, app.run_scenario(data["scenario"], bool(data.get("llm"))))
-                if path == "/api/demo/approve":
-                    return self._json(200, app.approve(str(data.get("intent_id", ""))))
-                if path == "/api/demo/revoke":
-                    app.revoke()
-                    return self._json(200, {"ok": True})
-                if path == "/api/demo/paypal-witness":
-                    return self._json(200, app.paypal_witness())
-                if path == "/api/demo/anchor":
-                    return self._json(200, app.anchor())
-                if path == "/api/demo/tamper":
-                    return self._json(200, app.tamper())
-                if path == "/api/demo/reset":
-                    app.reset()
-                    return self._json(200, {"ok": True})
-                if path == "/api/demo/dispute-evidence":
-                    if not allow_dispute_submit:
-                        return self._json(403, {"error": "dispute submission is disabled on this deployment"})
-                    dispute_id = str(data.get("dispute_id", ""))
-                    res = app.disputes.submit_evidence(dispute_id, app.signed)
-                    return self._json(200, {"bundle_digest": res["bundle_digest"]})
-                return self._json(404, {"error": "not found"})
+                app = self._app()
+                with app.request_lock:
+                    return self._post_session(path, data, app)
             except (OrchestratorError, AnchorError, DisputeError, PayPalError, KeyError, ValueError, RuntimeError, PermissionError) as exc:
                 return self._json(400, {"error": str(exc)[:300]})
             except Exception:  # never leak internals
                 return self._json(500, {"error": "internal error"})
+
+        def _post_session(self, path: str, data: dict, app: DemoApp):
+            if path == "/api/verify-bundle":
+                if limiter is not None and not limiter.allow(self._sid):
+                    return self._json(429, {"error": "too many requests; try again later"})
+                return self._json(200, app.verify_bundle(data.get("bundle", {}),
+                                                         data.get("expected_head_hash")))
+            if not demo_actions:
+                return self._json(403, {"error": "demo actions are disabled"})
+            if limiter is not None and not limiter.allow(self._sid):
+                return self._json(429, {"error": "too many demo actions; try again later"})
+            if path == "/api/demo/run":
+                if data.get("scenario") not in SCENARIOS:
+                    return self._json(400, {"error": "unknown scenario"})
+                return self._json(200, app.run_scenario(data["scenario"], bool(data.get("llm"))))
+            if path == "/api/demo/approve":
+                return self._json(200, app.approve(str(data.get("intent_id", ""))))
+            if path == "/api/demo/revoke":
+                app.revoke()
+                return self._json(200, {"ok": True})
+            if path == "/api/demo/paypal-witness":
+                return self._json(200, app.paypal_witness())
+            if path == "/api/demo/anchor":
+                return self._json(200, app.anchor())
+            if path == "/api/demo/tamper":
+                return self._json(200, app.tamper())
+            if path == "/api/demo/reset":
+                app.reset()
+                return self._json(200, {"ok": True})
+            if path == "/api/demo/dispute-evidence":
+                if not allow_dispute_submit:
+                    return self._json(403, {"error": "dispute submission is disabled on this deployment"})
+                dispute_id = str(data.get("dispute_id", ""))
+                res = app.disputes.submit_evidence(dispute_id, app.signed)
+                return self._json(200, {"bundle_digest": res["bundle_digest"]})
+            return self._json(404, {"error": "not found"})
+
 
     return Handler
 

@@ -97,6 +97,7 @@ def make_shared_client(use_real_paypal: bool = True) -> tuple[PayPalClient, str]
 class DemoApp:
     def __init__(self, *, use_real_paypal: bool = True, allow_tamper: bool = True,
                  client: PayPalClient | None = None, paypal_mode: str = "simulated") -> None:
+        self.request_lock = threading.Lock()
         self.allow_tamper = allow_tamper
         self.paypal_mode = paypal_mode
         self._client: PayPalClient | None = client
