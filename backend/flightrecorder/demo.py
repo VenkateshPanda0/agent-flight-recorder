@@ -232,9 +232,9 @@ class DemoApp:
         directly in the database, bypassing the append-only API."""
         if not self.allow_tamper:
             raise PermissionError("tamper demo is disabled")
-        events = [e for e in self.ledger.events() if e.type == L.ORDER_CREATED]
+        events = self.ledger.events(event_types=(L.ORDER_CREATED,))
         if not events:
-            events = [e for e in self.ledger.events() if e.type == L.VERDICT_ISSUED]
+            events = self.ledger.events(event_types=(L.VERDICT_ISSUED,))
         if not events:
             raise ValueError("nothing to tamper with yet")
         target = events[0]

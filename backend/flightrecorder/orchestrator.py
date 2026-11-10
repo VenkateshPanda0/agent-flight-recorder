@@ -93,9 +93,8 @@ class Orchestrator:
             )
 
     def _find_mandate(self, mandate_id: str) -> SignedMandate | None:
-        for event in self.ledger.events(mandate_id=mandate_id):
-            if event.type == L.MANDATE_GRANTED:
-                return SignedMandate.from_dict(event.payload)
+        for event in self.ledger.events(mandate_id=mandate_id, event_types=(L.MANDATE_GRANTED,)):
+            return SignedMandate.from_dict(event.payload)
         return None
 
     # -- purchases ---------------------------------------------------------

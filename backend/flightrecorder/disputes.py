@@ -42,8 +42,8 @@ class DisputeHandler:
             for key in ("seller_transaction_id", "buyer_transaction_id"):
                 if t.get(key):
                     ids.add(t[key])
-        for e in self.ledger.events():
-            if e.type == L.ORDER_CAPTURED and e.payload.get("capture_id") in ids:
+        for e in self.ledger.events(event_types=(L.ORDER_CAPTURED,)):
+            if e.payload.get("capture_id") in ids:
                 return e.order_ref, e.mandate_id, e.payload["capture_id"]
         raise DisputeError("Dispute does not match any captured order in the log.")
 

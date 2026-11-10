@@ -19,7 +19,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 
-from .canonical import canonical_json, digest
+from .canonical import canonical_json, digest, unique_json_object
 from .guard import MandateState
 from .mandate import to_iso, utc_now
 
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_mandate ON events (mandate_id);
 CREATE INDEX IF NOT EXISTS idx_events_order ON events (order_ref);
+CREATE INDEX IF NOT EXISTS idx_events_type_mandate ON events (type, mandate_id);
 """
 
 # The validity guard keeps corrupt payloads visible to the chain verifier without
@@ -163,7 +164,10 @@ class Ledger:
         stored_payload = canonical_json(payload).decode("utf-8")
         clean_payload = json.loads(stored_payload)
 
-        with self._lock:
+        with self._lock, self._db:
+            # Reserve the SQLite writer before reading the head. Connection-local
+            # locks alone cannot protect the sequence number across connections.
+            self._db.execute("BEGIN IMMEDIATE")
             row = self._db.execute(
                 "SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1"
             ).fetchone()
@@ -177,8 +181,6 @@ class Ledger:
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (seq, stamp, type_, mandate_id, order_ref, stored_payload, prev_hash, event_hash),
             )
-            self._db.commit()
-
         return Event(seq, stamp, type_, mandate_id, order_ref, clean_payload, prev_hash, event_hash)
 
     # -- reading -----------------------------------------------------------
@@ -191,13 +193,14 @@ class Ledger:
             type=row["type"],
             mandate_id=row["mandate_id"],
             order_ref=row["order_ref"],
-            payload=json.loads(row["payload"]),
+            payload=json.loads(row["payload"], object_pairs_hook=unique_json_object),
             prev_hash=row["prev_hash"],
             hash=row["hash"],
         )
 
     def events(
-        self, *, mandate_id: str | None = None, order_ref: str | None = None
+        self, *, mandate_id: str | None = None, order_ref: str | None = None,
+        event_types: tuple[str, ...] | None = None,
     ) -> list[Event]:
         query = "SELECT * FROM events"
         clauses, params = [], []
@@ -207,6 +210,12 @@ class Ledger:
         if order_ref is not None:
             clauses.append("order_ref = ?")
             params.append(order_ref)
+        if event_types is not None:
+            if not event_types:
+                return []
+            placeholders = ", ".join("?" for _ in event_types)
+            clauses.append(f"type IN ({placeholders})")
+            params.extend(event_types)
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY seq"
@@ -247,7 +256,7 @@ class Ledger:
             if row["prev_hash"] != expected_prev:
                 return ChainCheck(False, count, seq, "previous-hash link is broken")
             try:
-                payload = json.loads(row["payload"])
+                payload = json.loads(row["payload"], object_pairs_hook=unique_json_object)
                 recomputed = _event_hash(
                     seq,
                     row["ts"],
@@ -257,7 +266,7 @@ class Ledger:
                     payload,
                     row["prev_hash"],
                 )
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, RecursionError):
                 return ChainCheck(False, count, seq, "event payload is unreadable")
             if recomputed != row["hash"]:
                 return ChainCheck(False, count, seq, "event contents do not match its hash")
@@ -281,7 +290,9 @@ class Ledger:
         refund_ids: set[str] = set()
         revoked = False
 
-        for event in self.events(mandate_id=mandate_id):
+        state_events = (MANDATE_REVOKED, ORDER_REQUESTED, ORDER_FAILED, ORDER_CREATED,
+                        ORDER_CAPTURED, ORDER_VOIDED, ORDER_REFUNDED)
+        for event in self.events(mandate_id=mandate_id, event_types=state_events):
             ref = event.order_ref or f"seq-{event.seq}"
             if event.type == MANDATE_REVOKED:
                 revoked = True

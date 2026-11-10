@@ -24,7 +24,7 @@ class WebhookProcessor:
 
     def _seen(self, event_id: str, event_type: str = L.WEBHOOK_RECEIVED) -> bool:
         return any(e.payload.get("event_id") == event_id
-                   for e in self.ledger.events() if e.type == event_type)
+                   for e in self.ledger.events(event_types=(event_type,)))
 
     def handle(self, headers: Mapping[str, str], event: dict) -> tuple[int, str]:
         """Return (http_status, short_reason)."""

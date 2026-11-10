@@ -136,6 +136,9 @@ def test_filters_by_mandate_and_order():
     assert len(log.events(mandate_id="m-1")) == 5
     assert len(log.events(mandate_id="m-2")) == 1
     assert [e.type for e in log.events(order_ref="O-1")] == [L.ORDER_CREATED, L.ORDER_CAPTURED]
+    assert [e.type for e in log.events(mandate_id="m-1", event_types=(L.ORDER_CAPTURED, L.MANDATE_GRANTED))] == [
+        L.MANDATE_GRANTED, L.ORDER_CAPTURED,
+    ]
 
 
 def test_intent_lookup_matches_existing_rows_after_reopening(tmp_path):
@@ -154,6 +157,56 @@ def test_intent_lookup_matches_existing_rows_after_reopening(tmp_path):
         assert reopened.verify().ok
     finally:
         reopened.close()
+
+
+def test_concurrent_connections_append_without_sequence_collision(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    path = str(tmp_path / 'shared.sqlite')
+    first, second = Ledger(path), Ledger(path)
+    inserting, release, second_started = Event(), Event(), Event()
+
+    def pause_before_insert(sql):
+        if sql.startswith('INSERT INTO events'):
+            inserting.set()
+            assert release.wait(5)
+
+    first._db.set_trace_callback(pause_before_insert)
+
+    def append_second():
+        second_started.set()
+        return second.append('SECOND', {})
+
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            one = pool.submit(first.append, 'FIRST', {})
+            assert inserting.wait(5)
+            two = pool.submit(append_second)
+            assert second_started.wait(5)
+            try:
+                # The old code lets the second writer claim the first sequence number.
+                from concurrent.futures import TimeoutError
+                try:
+                    two.result(timeout=0.1)
+                except TimeoutError:
+                    pass
+            finally:
+                release.set()
+            assert sorted((one.result().seq, two.result().seq)) == [1, 2]
+        assert first.verify().ok
+    finally:
+        first.close()
+        second.close()
+
+
+def test_ledger_verifier_rejects_duplicate_payload_fields():
+    log = Ledger()
+    log.append('TEST', {'amount_minor': 8999})
+    with log._db:
+        log._db.execute('UPDATE events SET payload = ?', ('{"amount_minor":1,"amount_minor":8999}',))
+    result = log.verify()
+    assert not result.ok and result.first_bad_seq == 1
 
 
 def test_ledger_persists_to_disk(tmp_path):
